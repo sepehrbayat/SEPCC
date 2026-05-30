@@ -8,9 +8,36 @@ A free and open-source proxy that gives you **unlimited Claude Code** access by 
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge)](https://github.com/astral-sh/uv)
 
-[Quick Start](#quick-start) · [What SEPCC adds](#what-sepcc-adds) · [Providers](#providers) · [Development](#development) · [License & Attributions](#license-and-attributions)
-
 </div>
+
+---
+
+## Contents
+
+- [The short version](#the-short-version)
+- [What SEPCC adds](#what-sepcc-adds)
+- [Quick Start](#quick-start)
+  - [1. Install](#1-install)
+  - [2. Start the proxy](#2-start-the-proxy)
+  - [3. Configure a provider](#3-configure-a-provider)
+  - [4. Bootstrap your project](#4-bootstrap-your-project-context-features)
+  - [5. Launch Claude Code](#5-launch-claude-code)
+- [Providers](#providers)
+- [Connect your editor](#connect-your-editor)
+- [Discord and Telegram bots](#discord-and-telegram-bots)
+- [Your first prompt](#your-first-prompt)
+- [How it works](#how-it-works)
+- [V2Ray system proxy (port 10808)](#v2ray-system-proxy-port-10808)
+- [Windows Desktop Shortcut](#windows-desktop-shortcut)
+  - [First-run setup](#first-run-setup)
+  - [How it works](#how-it-works-1)
+  - [Empty folder? No projects yet?](#empty-folder-no-projects-yet)
+  - [Changing the projects root later](#changing-the-projects-root-later)
+  - [How this differs on Linux and macOS](#how-this-differs-on-linux-and-macos)
+  - [Opting out](#opting-out)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License and Attributions](#license-and-attributions)
 
 ---
 
@@ -399,60 +426,124 @@ To disable auto-detection, flip `AUTO_DETECT_SYSTEM_PROXY` to `false` in the Adm
 
 ## Windows Desktop Shortcut
 
-On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy server and drops you directly into a project — no terminal commands needed.
+On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy server and drops you directly into a project — no terminal commands needed. Double-click, pick a project, start coding.
 
-### What happens when you double-click it
+### First-run setup
 
-1. The `launch-fcc-claude.cmd` script starts the SEPCC proxy server in a separate window.
-2. It waits for the server to become healthy (up to 30 seconds).
-3. `pick-project.ps1` opens and shows you a numbered list of all folders inside your projects directory.
-4. You pick a project — by number, by browsing with a folder dialog, or by typing a path manually.
-5. **If the project hasn't been bootstrapped yet** (no `.claude/settings.json`), the launcher auto-runs `fcc-bootstrap-context` to scaffold hooks, agents, and the handoff system. You don't need to do anything — it skips this on subsequent launches.
-6. It launches `fcc-claude` pointed at that project folder, with the full context layer active.
+The very first time you launch the shortcut, a setup wizard appears in the terminal:
 
-The shortcut works out of the box. You can pin it to your taskbar or start menu. Every feature — proxy routing, context handoff, session resume, subagent architecture — activates without touching a terminal.
+```
+============================================================
+  SEPCC — First-Time Setup
+============================================================
 
-### The projects path
+Where should your projects live?
 
-The project picker looks for folders inside `%USERPROFILE%\projects` by default — that's `C:\Users\<your-name>\projects`. You can override it by setting the `FCC_PROJECTS_ROOT` environment variable to any path you want.
+  Suggested: C:\Users\<you>\Projects
 
-**If the folder doesn't exist yet, the picker creates it for you automatically.** No error, no manual `mkdir` step. The first time you run the shortcut, it creates the folder silently and shows an empty list — you can still browse or type a path manually. After you've added projects to the folder, they show up in the numbered list.
-
-### Customizing the shortcut
-
-The launcher resolves the SEPCC repo location automatically from the script's own location — no hardcoded paths. If you move the repo, the shortcut follows. If you need to override it (for example, if you want the shortcut to live somewhere else but still point to the right install), set `FCC_REPO_ROOT`:
-
-```cmd
-set "FCC_REPO_ROOT=D:\tools\SEPCC"
+  [Enter]  Accept the suggestion above
+  [    B]  Browse for a different folder
+  [    0]  Type a path manually
 ```
 
-### The full path chain, explained
+Press Enter to accept `%USERPROFILE%\Projects`. The wizard then asks:
 
-When you click the shortcut:
+```
+Create 'C:\Users\<you>\Projects' as your projects folder? [Y/n]
+```
+
+Confirm, and the path is saved to `%APPDATA%\SEPCC\projects-root.txt`. You'll never see this screen again unless the stored path gets deleted or you explicitly reset it.
+
+If you already have files in `%USERPROFILE%\projects` (a common default), the wizard detects it and adopts it silently — no prompt, no delay.
+
+### How it works
+
+Every launch after the first:
+
+1. The launcher script starts the SEPCC proxy server in a separate window.
+2. It waits for the server to become healthy (up to 30 seconds).
+3. `pick-project.ps1` reads your saved projects root and shows a numbered list of every project folder inside it.
+4. You pick a project — by number, by [B]rowse dialog, or by [0] typing a path manually. You can also press [R] to reset and pick a new projects root.
+5. **The projects root itself can never be selected as a project** — you must pick a subfolder inside it. If you browse to a folder outside the root, you get a friendly reminder but it still opens.
+6. If the project hasn't been bootstrapped yet (no `.claude/settings.json`), the launcher auto-runs `fcc-bootstrap-context` to scaffold hooks, agents, and the handoff system.
+7. It launches `fcc-claude` pointed at that project folder, with the full context layer active.
+
+The path chain:
 
 ```
 Desktop shortcut (launch-fcc-claude.cmd)
-  → Script resolves repo root from its own location (%~dp0..\..)
+  → Resolves repo root from its own location (%~dp0..\..)
   → Starts proxy server on port 8082
   → Runs pick-project.ps1:
-      → Looks in %FCC_PROJECTS_ROOT% (default: %USERPROFILE%\projects)
-      → Auto-creates the folder if it doesn't exist
+      → Loads saved projects root from %APPDATA%\SEPCC\projects-root.txt
       → Lists subdirectories as numbered choices
-      → Or: B to browse, 0 to type a path
-  → Launches fcc-claude <selected-project-path>
-  → fcc-claude sets up environment, runs claude --resume (or fresh)
+      → [B]rowse, [0] type path, or [R] change projects root
+  → Auto-bootstraps if needed
+  → Launches fcc-claude
 ```
 
-This is meant to be the frictionless Windows experience. No terminal, no manual env var setup, no "where's my project root." Just double-click, pick a project, start coding.
+### Empty folder? No projects yet?
 
-### What happens with empty folders
+If your projects root exists but has no subfolders yet, the picker tells you exactly what to do:
 
-If you pick an empty folder (or create one and select it), the launcher notices and prompts you:
+```
+  No project folders found yet.
 
-- **Start fresh** — just press Enter. The launcher auto-bootstraps the folder and Claude Code opens ready to scaffold whatever you ask it to build.
-- **Copy an existing project** — type `q` to quit, copy your project's contents into the folder, then re-launch the shortcut. Now the picker shows it as a proper project with all the context features active.
+  What to do:
+    1. Create a subfolder here for your project, then re-launch.
+    2. Copy an existing project folder into this location.
+    3. Use B to browse to a project outside this root (not recommended).
+```
 
-The idea is simple: keep all your projects under one root (`%USERPROFILE%\projects` by default). If something lives elsewhere, copy it in — the picker needs subdirectories, not symlinks. Everything gets the same auto-bootstrap treatment on first launch, and `fcc-bootstrap-context` is always safe to re-run with `--force` if you want to refresh the scaffold.
+You can still press B to browse anywhere or 0 to type a path directly — the picker won't block you. But the recommended workflow is: create a subfolder first (one per project), then re-launch. That way every project shows up in the list going forward.
+
+If you pick a folder that's completely empty (no files at all), the launcher gives you a choice:
+
+- **Press Enter** — start fresh. Auto-bootstrap runs, Claude Code launches, you tell it what to build.
+- **Type `q`** — quit, copy your existing project into the folder, re-launch.
+
+### Changing the projects root later
+
+You have three options, from easiest to most deliberate:
+
+1. **During picker**: Press `R` at the project selection prompt. This deletes the saved config and exits. Next launch shows the first-run wizard again.
+2. **Delete the config file**: Delete `%APPDATA%\SEPCC\projects-root.txt`. Same effect — next launch re-runs setup.
+3. **Use an environment variable**: Set `FCC_PROJECTS_ROOT` system-wide or in your shell. The picker uses this instead of the saved config. Useful for portable setups or if you share a machine.
+
+```cmd
+set "FCC_PROJECTS_ROOT=D:\all-my-coding-projects"
+```
+
+The env var takes priority over the saved config, so you can switch roots without deleting anything.
+
+### How this differs on Linux and macOS
+
+The desktop shortcut is Windows-only. On Linux and macOS, you use the terminal:
+
+**Linux:**
+- Install via `install.sh`
+- Start the proxy: `fcc-server` in one terminal
+- Launch Claude: `fcc-claude /path/to/your/project` in another
+- No interactive picker — you navigate by path
+- Projects config would live at `~/.config/sepcc/projects-root.txt`
+- You can create a `.desktop` file for one-click launch if you want
+
+**macOS:**
+- Same install and two-terminal workflow as Linux
+- Config would live at `~/Library/Application Support/sepcc/projects-root.txt`
+- You can wrap this in a `.app` bundle or Dock shortcut for one-click behavior
+- Neither a `.app` bundle nor a Dock shortcut is provided today
+
+On all platforms, the `FCC_PROJECTS_ROOT` environment variable is the universal override. Set it in `.bashrc`, `.zshrc`, or your shell profile and both `fcc` and `fcc-claude` respect it.
+
+### Opting out
+
+If you don't want the picker, the stored path, or any of this logic:
+
+- **Skip the shortcut entirely.** Start `fcc-server` in one terminal, run `fcc <project-path>` in another. The picker only runs when you click the desktop shortcut.
+- **Set `FCC_PROJECTS_ROOT` to the exact project path you want.** The picker skips entirely because a single project isn't a projects root — it just opens directly.
+- **Delete `%APPDATA%\SEPCC\projects-root.txt`** to clear the saved config and go back to square one.
+- **Don't want the shortcut at all?** Delete `launch-fcc-claude.cmd` and `pick-project.ps1` from your install. Nothing else depends on them.
 
 ---
 

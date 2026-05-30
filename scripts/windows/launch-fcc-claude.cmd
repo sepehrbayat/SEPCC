@@ -6,7 +6,6 @@ REM Resolve FCC_REPO from this script's location: ...\scripts\windows\launch-fcc
 set "FCC_REPO=%~dp0..\.."
 for %%I in ("%FCC_REPO%") do set "FCC_REPO=%%~fI"
 if defined FCC_REPO_ROOT set "FCC_REPO=%FCC_REPO_ROOT%"
-if not defined FCC_PROJECTS_ROOT set "FCC_PROJECTS_ROOT=%USERPROFILE%\projects"
 
 set "FCC_PY=%FCC_REPO%\.venv314\Scripts\python.exe"
 set "FCC_SERVER=%FCC_REPO%\.venv314\Scripts\fcc-server.exe"
