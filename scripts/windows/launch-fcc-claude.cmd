@@ -154,16 +154,70 @@ if errorlevel 1 (
     )
 )
 
-if not exist "%FCC_PROJECT%\.claude\settings.json" (
-    echo First run in this project -- setting up context scaffolding...
+REM Check if the full bootstrap scaffold is in place (not just settings.json).
+REM A partial setup (e.g. only settings.json from an older CLI) needs refresh.
+set "BOOTSTRAP_MISSING=0"
+set "BOOTSTRAP_OUTDATED=0"
+set "BOOTSTRAP_NEW=0"
+if not exist "%FCC_PROJECT%\.claude\settings.json" set "BOOTSTRAP_NEW=1"
+if not exist "%FCC_PROJECT%\.claude\agents\" set "BOOTSTRAP_MISSING=1"
+if not exist "%FCC_PROJECT%\.claude\skills\" set "BOOTSTRAP_MISSING=1"
+if not exist "%FCC_PROJECT%\.claude\commands\" set "BOOTSTRAP_MISSING=1"
+if not exist "%FCC_PROJECT%\.fcc\context\handoff.md" set "BOOTSTRAP_MISSING=1"
+
+if "%BOOTSTRAP_NEW%"=="1" (
+    echo.
+    echo This project hasn't been set up for SEPCC yet.
+    echo Running context bootstrap to install hooks, agents, skills,
+    echo commands, and the handoff system ^(50+ scaffolding files^)...
+    echo.
     uv run fcc-bootstrap-context --target "%FCC_PROJECT%"
     if errorlevel 1 (
         echo Bootstrap failed. Continuing without context layer.
     ) else (
         echo Context scaffolding ready.
     )
+    echo.
+) else if "%BOOTSTRAP_MISSING%"=="1" (
+    echo.
+    echo ================================================================
+    echo This project has a partial SEPCC setup.
+    echo Some scaffolding files are missing.
+    echo.
+    echo What is present:
+    for %%F in (".claude\settings.json" ".claude\agents" ".claude\skills" ".claude\commands" ".fcc\context\handoff.md") do (
+        if exist "%FCC_PROJECT%\%%~F" (
+            echo   [OK]  %%~F
+        ) else (
+            echo   [--]  %%~F  ^(missing^)
+        )
+    )
+    echo.
+    echo Running fcc-bootstrap-context will fill in the missing pieces
+    echo without removing your existing settings or handoff content.
+    echo ================================================================
+    echo.
+    set /p BOOTSTRAP_CHOICE="Run bootstrap now to complete the setup? [Y/n] "
+    if /i "!BOOTSTRAP_CHOICE!"=="" set "BOOTSTRAP_CHOICE=y"
+    if /i "!BOOTSTRAP_CHOICE!"=="y" (
+        echo.
+        uv run fcc-bootstrap-context --target "%FCC_PROJECT%"
+        if errorlevel 1 (
+            echo Bootstrap failed. You can retry later with:
+            echo   uv run fcc-bootstrap-context --force
+        ) else (
+            echo All scaffolding files are now in place.
+        )
+    ) else (
+        echo.
+        echo Skipped. You can run this later with:
+        echo   uv run fcc-bootstrap-context --force
+    )
+    echo.
+) else (
+    REM Full bootstrap already in place -- silent skip.
+    echo.
 )
-echo.
 
 REM --------------------------------------------------------------------
 REM Phase 4: Launch Claude Code
