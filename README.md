@@ -40,6 +40,8 @@
 
 **SEPCC (Unlimited Cloud Code)** is a drop-in proxy that lets you use Claude Code — Anthropic's flagship AI coding assistant — while routing all API traffic through your own backend providers. This means **unlimited coding sessions** without Anthropic API quotas, per-token charges, or usage caps.
 
+SEPCC is a fork of [Free Claude Code](https://github.com/Alishahryar1/free-claude-code) by Ali Khokhar. We took FCC's solid provider-proxy foundation and built an entire **deterministic context layer** on top of it — turning a stateless proxy into a stateful, resumable, long-running AI coding platform.
+
 ### Why Unlimited Cloud Code?
 
 | Feature | SEPCC Unlimited Cloud Code | Standard Claude Code |
@@ -52,18 +54,126 @@
 | **Offline coding** | Yes (local models) | No |
 | **Discord/Telegram bots** | Built-in | Not available |
 | **Voice notes** | Whisper + NVIDIA NIM | Not available |
+| **Session resume** | Full project-local session recovery | Limited transcript replay |
+| **Context hardening** | Deterministic handoff, memory, facts | Chat-only context |
 
-## What You Get
+---
 
-- **Unlimited Cloud Code** — drop-in proxy for Claude Code's Anthropic API calls with no usage caps.
-- **Seventeen provider backends**: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
-- **Per-model routing**: send Opus, Sonnet, Haiku, and fallback traffic to different providers for maximum flexibility.
-- **Native Claude Code `/model` picker** support through the proxy's `/v1/models` endpoint (Claude Code must opt in to Gateway model discovery; see [Model Picker](#model-picker)).
-- **Streaming, tool use, reasoning/thinking block handling**, and local request optimizations for blazing-fast responses.
-- **Optional Discord or Telegram bot** wrapper for remote coding sessions on the go.
-- **Optional VS Code extension** integration for IDE-based unlimited cloud coding.
-- **Optional voice-note transcription** through local Whisper or NVIDIA NIM.
-- **Local Admin UI** at `/admin` to edit proxy settings, validate changes, and check providers (loopback access only).
+## What SEPCC Built on Top of FCC
+
+FCC was a provider-router — it proxied API calls. SEPCC adds **five major systems** that turn it from a stateless proxy into a full AI coding platform with deterministic context, session resilience, and automated project bootstrapping.
+
+### 1. Context Hardening System (`core/context/`)
+
+The original FCC lost all context on session restart. SEPCC introduces a **deterministic context layer** that survives crashes, compaction, and restarts:
+
+- **Handoff Engine** (`handoff.py`) — persists *what must not be forgotten* across sessions: current task, decisions made, next concrete step. Unlike raw transcripts, the handoff is a compact structured file that gets injected into every `SessionStart`.
+- **SQLite Sidecar** (`sqlite_store.py`) — stores raw terminal and tool outputs by handle, queryable via `fcc-context-store` and `fcc-context-query`. Keeps the handoff slim while making raw data retrievable on demand.
+- **Retrieval Pipeline** (`retrieval.py`, `summarizer.py`, `storage.py`) — fetches, summarizes, and stores relevant context snippets so subagents and resumed sessions have exactly what they need without replaying full transcripts.
+
+### 2. Project Bootstrapper (`cli/bootstrap_context.py`)
+
+One command scaffolds an entire project for long-running Claude Code work:
+
+```bash
+fcc-bootstrap-context
+```
+
+This installs 50+ files into the target project:
+
+- **CLAUDE.md** and **CLAUDE.local.md** with project rules and local-machine facts
+- **Compact FCC hooks** (`scripts/hooks/`) — `SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `SubagentStop` — each with a single owner, no hook collisions
+- **Token Savior MCP** config in `.mcp.json` for deterministic code retrieval
+- **FCC context files** (`.fcc/context/`) — runtime contract, handoff, decisions, facts
+- **Plugin policy** (`.fcc/plugin-policy.yml`) — enforces single-owner rules for memory, code retrieval, and hooks
+- **Project subagents** (`.claude/agents/`) — specialized agents for code review, context auditing, product-logic review, and research
+- **Claude Code skills** (`.claude/skills/`) — context-recall, handoff-writer, route-task
+- **Slash commands** (`.claude/commands/`) — `handoff`, `recall`, `verify-context`
+
+Flags: `--force`, `--install-token-savior`, `--install-memsearch`, `--large-repo`.
+
+### 3. Context Doctor (`cli/context_doctor.py`)
+
+Validates and auto-repairs the FCC runtime scaffolding:
+
+```bash
+fcc context doctor
+```
+
+Checks and reports on:
+- Runtime contract file existence
+- Plugin policy integrity
+- Agent definition completeness
+- Supported hook configuration (all 5 required hooks)
+- Duplicate hook owner detection
+- MemSearch vs Claude-mem mutual exclusion
+- Token Savior baseline ownership
+- Ralph Loop policy (bounded, verified iterations with max cap)
+- SubagentStop as the stable subagent lifecycle hook (per official Claude Code docs)
+
+Run it anytime to verify your project's context layer is intact.
+
+### 4. Terminal Session Management (`cli/session_registry.py`, `cli/session_resume.py`, `cli/fcc_cli.py`)
+
+FCC sessions were ephemeral. SEPCC adds a **project-local session registry** (`.fcc/sessions.sqlite`) that makes sessions resumable:
+
+```bash
+fcc                  # launch (or auto-resume latest in project)
+fcc resume           # resume latest compatible session
+fcc resume <id>      # resume specific session
+fcc sessions list    # list all sessions in project
+fcc sessions last    # show most recent
+fcc sessions doctor  # health check
+fcc sessions clean   # remove stale entries
+fcc sessions rename <id> "name"
+```
+
+How resume works:
+- If the native Claude transcript exists → `claude --resume` for full context
+- If the transcript is lost but `handoff.md` exists → fresh session injected with compact handoff + retrieval snippets, linked as a continuation
+- `FCC_AUTO_RESUME_LAST_SESSION=true` auto-resumes the latest compatible session on plain `fcc`
+- `FCC_AUTO_RESUME_MAX_AGE_DAYS` and `FCC_AUTO_RESUME_PROJECT_SCOPED` tune auto-resume behavior
+
+### 5. Agent Runtime & Hook Architecture
+
+SEPCC ships a complete agent runtime contract (`.fcc/context/agent-runtime.md`) injected via `SessionStart` into every main chat. Subagents inherit operating rules from project agent definitions. Six hook scripts handle lifecycle events:
+
+| Hook | Script | Purpose |
+|------|--------|---------|
+| `SessionStart` | `session_start.py` | Injects runtime contract, local facts, current handoff |
+| `UserPromptSubmit` | `user_prompt_submit.py` | Processes handoff recall on request |
+| `PreCompact` | `precompact.py` | Preserves critical context before compaction |
+| `SubagentStop` | `subagent_stop.py` | Refreshes handoff after delegated subagent work |
+| `Stop` | `stop.py` | Final state persistence on session end |
+
+### Provider Enhancements
+
+Beyond the context layer, SEPCC fixed and extended several providers from the FCC base:
+- **Gemini**: fixed dual thinking controls that caused malformed requests
+- **Provider Registry**: extended with dynamic registration and validation
+- **Settings**: expanded configuration surface with system proxy support
+- **Admin UI**: extended sidebar with session and context management views
+
+### Summary: FCC vs SEPCC
+
+| Capability | Original FCC | SEPCC |
+|-----------|-------------|-------|
+| Provider proxy (17 backends) | Yes | Yes |
+| Model routing (Opus/Sonnet/Haiku) | Yes | Yes |
+| Admin UI | Yes | Yes (extended) |
+| Discord/Telegram bots | Yes | Yes |
+| Voice notes | Yes | Yes |
+| **Context hardening** | No | **Built from scratch** |
+| **Handoff persistence** | No | **SQLite-backed, compact, injectable** |
+| **Session resume** | No | **Full project-local registry + smart resume** |
+| **Project bootstrapper** | No | **One-command full scaffold (50+ files)** |
+| **Context doctor** | No | **Validation + auto-repair** |
+| **Agent runtime contract** | No | **Deterministic, hook-injected** |
+| **Subagent definitions** | No | **4 specialized FCC agents** |
+| **Claude Code skills** | No | **3 project skills** |
+| **Slash commands** | No | **handoff, recall, verify-context** |
+| **Gemini fix** | Bugged | **Fixed dual thinking controls** |
+| **System proxy support** | No | **Auto-detect + configure** |
 
 ### Subagent Architecture
 
@@ -127,7 +237,7 @@ fcc
 
 `fcc` reads the current configured port and auth token each time it starts, sets Claude Code environment variables (including a 190k-token `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and package-manager auto-update opt-in), runs a throttled best-effort Claude Code update check, and then launches the real `claude` command.
 
-Terminal sessions are project-local and resumable. A plain `fcc` from a project root resumes the latest compatible session when `FCC_AUTO_RESUME_LAST_SESSION=true`. Use `fcc resume`, `fcc sessions list`, and `fcc sessions doctor` for explicit recovery and diagnostics. `fcc-claude` remains available as a compatibility launcher.
+Terminal sessions are project-local and resumable — see [Session & Context Commands](#1-claude-code-cli) below.
 
 ---
 
@@ -359,20 +469,33 @@ fcc
 
 Keep `fcc-server` running while you work. The Admin UI manages proxy config, restarts the server when runtime settings change, and `fcc` reads the current Admin UI-managed port and auth token every time it starts. It also sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to `190000` for auto-compaction and resumes recent project sessions when enabled.
 
-Session commands:
+**Session commands (SEPCC context layer):**
 
 ```bash
-fcc resume
+fcc                  # launch Claude Code (auto-resume latest if configured)
+fcc resume           # resume latest compatible session
 fcc resume <session-id-or-name>
-fcc context doctor
-fcc sessions list
-fcc sessions last
-fcc sessions doctor
-fcc sessions clean
+fcc sessions list    # list all sessions in this project
+fcc sessions last    # show most recent session
+fcc sessions doctor  # health check session registry
+fcc sessions clean   # remove stale entries
 fcc sessions rename <session-id> "new-name"
 ```
 
+**Context commands (SEPCC context hardening):**
+
+```bash
+fcc context doctor   # validate and auto-repair context scaffolding
+fcc-bootstrap-context            # scaffold a project for long-running work
+fcc-bootstrap-context --force    # overwrite existing scaffolding
+fcc-bootstrap-context --large-repo  # add Claude Context MCP for large repos
+```
+
 `sdc` is an alias for the same terminal facade, so `sdc resume` and `sdc sessions list` are equivalent.
+
+When `FCC_AUTO_RESUME_LAST_SESSION=true`, a plain `fcc` from a project root auto-resumes the latest compatible session, or shows a compact picker when multiple recent sessions exist (`FCC_SESSION_PICKER_ON_AMBIGUOUS`). If the native Claude transcript is available, SEPCC launches with `--resume` for full context. If the transcript is missing but `.fcc/context/handoff.md` exists, SEPCC starts a fresh session with compact handoff + retrieval snippets and links it as a continuation. `FCC_AUTO_RESUME_MAX_AGE_DAYS` and `FCC_AUTO_RESUME_PROJECT_SCOPED` tune auto-resume behavior. `fcc-claude` remains available as a compatibility launcher.
+
+Bootstrapped projects include the agent runtime contract, plugin policy, project subagents, FCC hooks, and Token Savior MCP config. `SessionStart` injects the runtime contract + current handoff into every main chat. Subagents inherit operating rules from project agent definitions, and `SubagentStop` refreshes handoff after delegated work. Run `fcc context doctor` any time to verify the scaffolding is intact.
 
 ### 2. VS Code Extension
 
@@ -508,14 +631,17 @@ In the **Admin UI**, open **Messaging** and scroll to **Voice**. Turn on **Voice
 
 Diagram source: [`assets/how-it-works.mmd`](assets/how-it-works.mmd).
 
-Important pieces:
+Architecture layers (bottom to top):
 
-- **FastAPI** exposes Anthropic-compatible routes such as `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/models`.
-- **Model routing** resolves the Claude model name to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`.
-- **NIM, OpenCode Zen, and OpenCode Go** use OpenAI chat streaming translated into Anthropic SSE.
-- **Wafer, OpenRouter, DeepSeek, Kimi, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama** use Anthropic Messages style transports where applicable (with provider-specific quirks and model-list URLs).
-- The proxy **normalizes thinking blocks, tool calls, token usage metadata, and provider errors** into the shape Claude Code expects.
-- **Request optimizations** answer trivial Claude Code probes locally to save latency and quota.
+- **Provider Layer** (`providers/`) — 17 backends with per-model routing. Each provider extends `AnthropicMessagesTransport` or `OpenAIChatTransport`. The registry maps provider IDs to transport factories with dynamic validation.
+- **Core Protocol Layer** (`core/anthropic/`) — SSE streaming, thinking/reasoning normalization, tool-use translation, token counting, content conversion. Provider-agnostic Anthropic protocol utilities shared across all transports.
+- **Context Layer** (`core/context/`) — **SEPCC's key addition above FCC.** Handoff persistence, SQLite sidecar for raw outputs, retrieval pipeline, summarization, and deterministic storage. Ensures session state survives crashes and restarts.
+- **API Layer** (`api/`) — FastAPI routes (`/v1/messages`, `/v1/messages/count_tokens`, `/v1/models`), model routing, request optimization handlers, Admin UI with session and context management views.
+- **CLI Layer** (`cli/`) — `fcc` launcher, session registry, resume logic, Claude process manager. Bootstrapper (`bootstrap_context.py`) and doctor (`context_doctor.py`) for project scaffolding.
+- **Hook Scripts** (`scripts/hooks/`) — Six lifecycle hooks that inject context, persist handoff, and handle compaction. Each hook has a single owner enforced by the plugin policy.
+- **Templates** (`templates/project/`) — Complete project scaffold: CLAUDE.md pair, agent definitions, skills, slash commands, context files, MCP config, plugin policy, hook settings.
+
+Request flow: Claude Code CLI → FastAPI routes → model routing → provider transport → upstream API. `SessionStart` hook injects the runtime contract + handoff at session open. `SubagentStop` hook writes updated handoff after subagent delegation. `PreCompact` hook preserves critical context before context window compaction.
 
 ---
 
@@ -525,17 +651,22 @@ Important pieces:
 
 ```text
 SEPCC/
-├── server.py              # ASGI entry point
-├── api/                   # FastAPI routes, service layer, routing, optimizations
-├── core/                  # Shared Anthropic protocol helpers and SSE utilities
-├── providers/             # Provider transports, registry, rate limiting
-├── messaging/             # Discord/Telegram adapters, sessions, voice
-├── cli/                   # Package entry points and Claude process management
-├── config/                # Settings, provider catalog, logging
-├── templates/             # Project bootstrap templates (context, hooks, agents)
-├── docs/                  # Context hardening and architecture documentation
-├── scripts/               # Install scripts and hook implementations
-└── tests/                 # Unit, contract, and smoke tests
+├── server.py                 # ASGI entry point
+├── api/                      # FastAPI routes, service layer, routing, optimizations
+│   └── admin_static/         # Admin UI frontend (extended for SEPCC)
+├── core/
+│   ├── anthropic/            # Shared Anthropic protocol helpers, SSE utilities
+│   └── context/              # ★ SEPCC ADDITION: handoff, retrieval, SQLite store, summarizer
+├── providers/                # 17 provider transports, registry, rate limiting (Gemini fixed)
+├── messaging/                # Discord/Telegram adapters, sessions, voice
+├── cli/                      # ★ SEPCC EXTENDED: session registry, resume, bootstrap, doctor
+├── config/                   # Settings (extended with system proxy), provider catalog, logging
+├── scripts/
+│   ├── hooks/                # ★ SEPCC ADDITION: SessionStart, SubagentStop, PreCompact, etc.
+│   └── windows/              # ★ SEPCC ADDITION: Windows launcher helpers
+├── templates/project/        # ★ SEPCC ADDITION: full project bootstrap (50+ files)
+├── docs/                     # ★ SEPCC ADDITION: context hardening, agent memory, tooling audit
+└── tests/                    # Unit, contract, smoke tests (extended for SEPCC modules)
 ```
 
 ### 2. Run From Source
