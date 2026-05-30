@@ -70,6 +70,20 @@ if not defined FCC_PROJECT (
 )
 
 echo Working in: %FCC_PROJECT%
+
+REM Auto-bootstrap context scaffolding if the project hasn't been set up yet.
+set "FCC_BOOTSTRAP=%FCC_REPO%\.venv314\Scripts\fcc-bootstrap-context.exe"
+if not exist "%FCC_PROJECT%\.claude\settings.json" (
+    if exist "%FCC_BOOTSTRAP%" (
+        echo First run in this project — setting up context scaffolding...
+        "%FCC_BOOTSTRAP%" --target "%FCC_PROJECT%"
+        if errorlevel 1 (
+            echo Bootstrap failed. Continuing without context layer.
+        ) else (
+            echo Context scaffolding ready.
+        )
+    )
+)
 echo.
 
 "%FCC_CLAUDE%" "%FCC_PROJECT%"

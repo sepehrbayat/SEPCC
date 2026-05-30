@@ -407,9 +407,10 @@ On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy s
 2. It waits for the server to become healthy (up to 30 seconds).
 3. `pick-project.ps1` opens and shows you a numbered list of all folders inside your projects directory.
 4. You pick a project — by number, by browsing with a folder dialog, or by typing a path manually.
-5. It launches `fcc-claude` pointed at that project folder.
+5. **If the project hasn't been bootstrapped yet** (no `.claude/settings.json`), the launcher auto-runs `fcc-bootstrap-context` to scaffold hooks, agents, and the handoff system. You don't need to do anything — it skips this on subsequent launches.
+6. It launches `fcc-claude` pointed at that project folder, with the full context layer active.
 
-The shortcut works out of the box. You can pin it to your taskbar or start menu.
+The shortcut works out of the box. You can pin it to your taskbar or start menu. Every feature — proxy routing, context handoff, session resume, subagent architecture — activates without touching a terminal.
 
 ### The projects path
 
