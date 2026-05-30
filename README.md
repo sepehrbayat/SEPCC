@@ -445,6 +445,15 @@ Desktop shortcut (launch-fcc-claude.cmd)
 
 This is meant to be the frictionless Windows experience. No terminal, no manual env var setup, no "where's my project root." Just double-click, pick a project, start coding.
 
+### What happens with empty folders
+
+If you pick an empty folder (or create one and select it), the launcher notices and prompts you:
+
+- **Start fresh** — just press Enter. The launcher auto-bootstraps the folder and Claude Code opens ready to scaffold whatever you ask it to build.
+- **Copy an existing project** — type `q` to quit, copy your project's contents into the folder, then re-launch the shortcut. Now the picker shows it as a proper project with all the context features active.
+
+The idea is simple: keep all your projects under one root (`%USERPROFILE%\projects` by default). If something lives elsewhere, copy it in — the picker needs subdirectories, not symlinks. Everything gets the same auto-bootstrap treatment on first launch, and `fcc-bootstrap-context` is always safe to re-run with `--force` if you want to refresh the scaffold.
+
 ---
 
 ## Development

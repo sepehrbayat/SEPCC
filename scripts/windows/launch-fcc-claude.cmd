@@ -1,6 +1,6 @@
 @echo off
 REM Launch Free Claude Code proxy + Claude CLI in a project you choose.
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 
 REM Resolve FCC_REPO from this script's location: ...\scripts\windows\launch-fcc-claude.cmd → repo root.
 set "FCC_REPO=%~dp0..\.."
@@ -70,6 +70,29 @@ if not defined FCC_PROJECT (
 )
 
 echo Working in: %FCC_PROJECT%
+
+REM Detect empty folder — nothing inside (no files, no subdirs).
+dir /b "%FCC_PROJECT%" 2>nul | findstr . >nul
+if errorlevel 1 (
+    echo.
+    echo ================================================================
+    echo This folder is empty: %FCC_PROJECT%
+    echo.
+    echo If you have an existing project somewhere else, copy its contents
+    echo into this folder, then re-launch this shortcut. This keeps your
+    echo projects organized under one root so the picker can find them.
+    echo.
+    echo Otherwise, Claude Code can help you scaffold a new project from
+    echo scratch — just continue below.
+    echo ================================================================
+    echo.
+    set /p EMPTY_CHOICE="Press Enter to start fresh, or type q to quit: "
+    if /i "!EMPTY_CHOICE!"=="q" (
+        echo Come back when your project is ready.
+        pause
+        exit /b 0
+    )
+)
 
 REM Auto-bootstrap context scaffolding if the project hasn't been set up yet.
 set "FCC_BOOTSTRAP=%FCC_REPO%\.venv314\Scripts\fcc-bootstrap-context.exe"
