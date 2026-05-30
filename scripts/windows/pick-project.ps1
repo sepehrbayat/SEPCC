@@ -59,9 +59,13 @@ function Save-ProjectsRoot {
     New-Item -Path $ConfigDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
     $normalized = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     # Atomic write: temp file then rename
-    $tmp = "$ConfigFile.tmp"
+    $tmp = Join-Path $ConfigDir 'projects-root.tmp'
     Set-Content -LiteralPath $tmp -Value $normalized -Encoding ascii -NoNewline
-    [IO.File]::Replace($tmp, $ConfigFile, $null)
+    if (Test-Path -LiteralPath $ConfigFile) {
+        [IO.File]::Replace($tmp, $ConfigFile, $null)
+    } else {
+        Move-Item -LiteralPath $tmp -Destination $ConfigFile -Force
+    }
 }
 
 function Load-ProjectsRoot {
