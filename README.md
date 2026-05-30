@@ -158,7 +158,19 @@ Open the Admin UI URL. Pick a provider, paste your API key, click **Validate** t
 
 The default model is `deepseek/deepseek-v4-pro`. You'll need a [DeepSeek API key](https://platform.deepseek.com/api_keys). Or choose any of the 17 supported providers listed below — that's the whole point of **unlimited Claude Code**: you pick the backend.
 
-### 4. Launch Claude Code
+### 4. Bootstrap your project (context features)
+
+```bash
+fcc-bootstrap-context
+```
+
+Run this once in your project root. It drops 50+ scaffolding files: hook scripts, agent definitions, slash commands, the handoff system, and `.claude/settings.json` with all five lifecycle hooks wired up.
+
+**Without this step, the proxy still works** — routing, session tracking, auto-resume, everything on the network layer. What you won't get is the context layer: the handoff that survives crashes, the agent runtime contract injected into every session, the SubagentStop hook that keeps state after subagents run, the project skills and slash commands.
+
+Run `fcc-bootstrap-context` again later with `--force` to refresh the scaffold, or `fcc context doctor` to check what's in place.
+
+### 5. Launch Claude Code
 
 ```bash
 fcc
