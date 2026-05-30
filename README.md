@@ -428,6 +428,18 @@ To disable auto-detection, flip `AUTO_DETECT_SYSTEM_PROXY` to `false` in the Adm
 
 On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy server and drops you directly into a project — no terminal commands needed. Double-click, pick a project, start coding.
 
+### Creating the shortcut
+
+The repo doesn't include a `.lnk` file (they don't track well in git). Instead, after cloning, run this once:
+
+```powershell
+pwsh scripts/windows/create-desktop-shortcut.ps1
+```
+
+This drops an `SEPCC.lnk` on your desktop pointing at `launch-fcc-claude.cmd`. The script resolves paths from its own location, so it works wherever you cloned the repo.
+
+If you move the repo later, just re-run the script — it overwrites the old shortcut with updated paths.
+
 ### First-run setup
 
 The very first time you launch the shortcut, a setup wizard appears in the terminal:
