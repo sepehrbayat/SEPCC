@@ -16,118 +16,134 @@ set "FCC_BOOTSTRAP=%VENV_SCRIPTS%\fcc-bootstrap-context.exe"
 set "FCC_OPEN_BROWSER=0"
 
 REM --------------------------------------------------------------------
-REM Phase 0: Ensure dependencies are installed (first-launch auto-setup)
+REM Phase 0: Resolve the SEPCC toolchain — system install, repo venv, or build
 REM --------------------------------------------------------------------
+REM Priority order:
+REM   1. System-wide install (uv tool install sepcc) — already on PATH
+REM   2. Repo venv (.venv314\Scripts) — already built in this clone
+REM   3. Auto-build — create venv and sync (asks permission first)
 
-REM Check if uv is available. If not, run the full installer.
-where uv >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo uv is not installed. Running the SEPCC installer first...
-    echo This only happens once — dependencies will be cached afterwards.
-    echo.
-    if exist "%FCC_REPO%\scripts\install.ps1" (
-        powershell -NoProfile -ExecutionPolicy Bypass -File "%FCC_REPO%\scripts\install.ps1"
+set "TOOLS_FROM=repo-venv"
+
+REM --- Tier 1: check for system-wide install via uv tools ---
+where fcc-server >nul 2>&1
+if not errorlevel 1 (
+    for %%I in (fcc-server.exe) do set "FCC_SERVER=%%~$PATH:I"
+    for %%I in (fcc-claude.exe) do set "FCC_CLAUDE=%%~$PATH:I"
+    for %%I in (fcc-bootstrap-context.exe) do set "FCC_BOOTSTRAP=%%~$PATH:I"
+    REM Resolve python from the same uv-tools environment
+    if exist "%FCC_SERVER%" (
+        for %%I in ("%FCC_SERVER%") do set "TOOLS_BIN=%%~dpI"
+        if exist "!TOOLS_BIN!python.exe" set "FCC_PY=!TOOLS_BIN!python.exe"
+        set "TOOLS_FROM=system"
+    )
+)
+
+REM --- Tier 2: fall back to repo venv if system tools not found ---
+if "%TOOLS_FROM%"=="repo-venv" (
+    if exist "%FCC_SERVER%" (
+        set "TOOLS_FROM=repo-venv"
+    ) else (
+        REM --- Tier 3: need to build. First check uv is available. ---
+        where uv >nul 2>&1
         if errorlevel 1 (
             echo.
             echo ================================================================
-            echo Installation failed.
+            echo SEPCC tools are not installed yet and uv was not found.
             echo.
-            echo If you are behind a firewall or internet restriction, you
-            echo may need to enable a proxy first:
-            echo.
-            echo   V2Ray / V2RayN:  port 10808  (SOCKS5)
-            echo   Clash / Verge:    port 7890   (HTTP)
-            echo   Shadowsocks:      port 1080   (SOCKS5)
-            echo   Generic HTTP:     port 3128, 8888
-            echo.
-            echo Enable your proxy, then run this shortcut again.
+            echo You need to run the installer once:
+            echo   powershell -File "%FCC_REPO%\scripts\install.ps1"
             echo ================================================================
             echo.
             pause
             exit /b 1
         )
-    ) else (
-        echo installer script not found at %FCC_REPO%\scripts\install.ps1
-        echo Please follow the manual install steps in the README.
-        pause
-        exit /b 1
-    )
-    REM Re-check uv after installer
-    where uv >nul 2>&1
-    if errorlevel 1 (
-        echo uv still not found after install. Try opening a new terminal or
-        echo adding uv to your PATH: https://docs.astral.sh/uv/getting-started/installation/
-        pause
-        exit /b 1
-    )
-)
 
-REM Ensure Python 3.14 venv and dependencies are installed.
-if not exist "%VENV_SCRIPTS%\python.exe" (
-    echo.
-    echo Setting up Python 3.14 environment...  ^(first launch only^)
-    cd /d "%FCC_REPO%"
-
-    uv python install 3.14.0 2>nul
-    uv venv --python 3.14.0 .venv314 2>nul
-    if not exist "%VENV_SCRIPTS%\python.exe" (
-        echo Failed to create virtual environment.
-        pause
-        exit /b 1
-    )
-    echo Python environment created.
-)
-
-REM Sync dependencies if the server executable is missing.
-if not exist "%FCC_SERVER%" (
-    echo.
-    echo Installing SEPCC dependencies...  ^(first launch only^)
-    cd /d "%FCC_REPO%"
-
-    uv sync --no-dev 2>"%TEMP%\sepcc-sync-error.txt"
-    if not exist "%FCC_SERVER%" (
         echo.
-        echo ================================================================
-        echo Dependency installation failed.
+        echo SEPCC tools aren't set up yet in this clone.
+        echo I can create the Python environment and install dependencies now.
+        echo This only needs to happen once.
         echo.
-
-        REM Check what went wrong: network error or something else?
-        findstr /i "connect timeout resolve refused unreachable SSL TLS certificate" "%TEMP%\sepcc-sync-error.txt" >nul 2>&1
-        if not errorlevel 1 (
-            echo It looks like a network connectivity issue. If you are
-            echo behind a firewall or internet restriction, enable your
-            echo proxy and try again:
+        set /p BUILD_CHOICE="Proceed with setup? [Y/n] "
+        if /i not "!BUILD_CHOICE!"=="" if /i not "!BUILD_CHOICE!"=="y" if /i not "!BUILD_CHOICE!"=="yes" (
             echo.
-            echo   Common proxy ports:
-            echo     V2Ray / V2RayN  →  socks5://127.0.0.1:10808
-            echo     Clash / Verge   →  http://127.0.0.1:7890
-            echo     Shadowsocks     →  socks5://127.0.0.1:1080
-            echo     V2Ray HTTP      →  http://127.0.0.1:10809
-            echo     Generic HTTP    →  port 3128, 8118, or 8888
-            echo.
-            echo After enabling your proxy, set it in the terminal:
-            echo.
-            echo   set HTTP_PROXY=http://127.0.0.1:10809
-            echo   set HTTPS_PROXY=http://127.0.0.1:10809
-            echo.
-            echo Then run this shortcut again.
-        ) else (
-            echo Check the error log: %TEMP%\sepcc-sync-error.txt
+            echo Skipped. You can set up later with:
+            echo   cd /d "%FCC_REPO%" ^&^& uv sync
+            pause
+            exit /b 0
         )
-        echo ================================================================
-        echo.
+
+        cd /d "%FCC_REPO%"
+
+        REM Create venv if missing
+        if not exist "%VENV_SCRIPTS%\python.exe" (
+            echo.
+            echo Creating Python 3.14 virtual environment...
+            uv python install 3.14.0 2>nul
+            uv venv --python 3.14.0 .venv314 2>nul
+            if not exist "%VENV_SCRIPTS%\python.exe" (
+                echo Failed to create virtual environment.
+                pause
+                exit /b 1
+            )
+        )
+
+        REM Sync dependencies
+        echo Installing SEPCC dependencies...
+        uv sync --no-dev 2>"%TEMP%\sepcc-sync-error.txt"
+        if not exist "%FCC_SERVER%" (
+            echo.
+            echo ================================================================
+            echo Dependency installation failed.
+            echo.
+
+            REM Show what actually went wrong
+            echo Error details:
+            echo ----8<----
+            type "%TEMP%\sepcc-sync-error.txt" 2>nul
+            echo ----8<----
+            echo.
+
+            REM Check if this looks like a network issue
+            findstr /i "connect timeout resolve refused unreachable SSL TLS certificate" "%TEMP%\sepcc-sync-error.txt" >nul 2>&1
+            if not errorlevel 1 (
+                REM Verify: actually try to reach the internet
+                powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'https://github.com' -UseBasicParsing -TimeoutSec 5; exit 0 } catch { exit 1 }" >nul 2>&1
+                if errorlevel 1 (
+                    echo This appears to be a network connectivity problem.
+                    echo If you use a proxy, enable it and try again:
+                    echo.
+                    echo   V2Ray / V2RayN  →  socks5://127.0.0.1:10808
+                    echo   Clash / Verge   →  http://127.0.0.1:7890
+                    echo   Shadowsocks     →  socks5://127.0.0.1:1080
+                    echo   V2Ray HTTP      →  http://127.0.0.1:10809
+                    echo.
+                    echo Set the proxy in your terminal, then run this shortcut again.
+                ) else (
+                    echo Your internet connection is working. This may be a
+                    echo different issue — check the error details above.
+                )
+            )
+            echo ================================================================
+            echo.
+            del "%TEMP%\sepcc-sync-error.txt" 2>nul
+            pause
+            exit /b 1
+        )
         del "%TEMP%\sepcc-sync-error.txt" 2>nul
-        pause
-        exit /b 1
+        echo Dependencies ready.
+        set "TOOLS_FROM=repo-venv"
     )
-    del "%TEMP%\sepcc-sync-error.txt" 2>nul
-    echo Dependencies ready.
 )
 
 REM --------------------------------------------------------------------
 REM Phase 1: Start the proxy server
 REM --------------------------------------------------------------------
+if "%TOOLS_FROM%"=="system" (
+    echo Using SEPCC tools from system install: %FCC_SERVER%
+) else (
+    echo Using SEPCC tools from repo venv: %FCC_SERVER%
+)
 cd /d "%FCC_REPO%"
 if errorlevel 1 (
     echo Could not find SEPCC install at: %FCC_REPO%
