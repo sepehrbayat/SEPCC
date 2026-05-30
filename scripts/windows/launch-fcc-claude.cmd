@@ -19,24 +19,52 @@ REM --------------------------------------------------------------------
 REM Phase 0: Resolve the SEPCC toolchain — system install, repo venv, or build
 REM --------------------------------------------------------------------
 REM Priority order:
-REM   1. System-wide install (uv tool install sepcc) — already on PATH
+REM   1. System-wide install (uv tool install) — PATH + known uv directories
 REM   2. Repo venv (.venv314\Scripts) — already built in this clone
 REM   3. Auto-build — create venv and sync (asks permission first)
+REM
+REM Desktop shortcuts on Windows don't always inherit the full user PATH,
+REM so we check explicit uv tool directories in addition to `where`.
 
 set "TOOLS_FROM=repo-venv"
 
-REM --- Tier 1: check for system-wide install via uv tools ---
+REM Build list of known uv tool bin directories
+set "UV_BIN_DIRS=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin"
+REM Also ask uv where it puts tools, if uv is on PATH
+where uv >nul 2>&1
+if not errorlevel 1 (
+    for /f "usebackq delims=" %%D in (`uv tool dir 2^>nul`) do (
+        set "UV_TOOL_DIR=%%D"
+    )
+    if defined UV_TOOL_DIR set "UV_BIN_DIRS=!UV_TOOL_DIR!;%UV_BIN_DIRS%"
+)
+
+REM --- Tier 1a: where (checks inherited PATH) ---
 where fcc-server >nul 2>&1
 if not errorlevel 1 (
     for %%I in (fcc-server.exe) do set "FCC_SERVER=%%~$PATH:I"
     for %%I in (fcc-claude.exe) do set "FCC_CLAUDE=%%~$PATH:I"
     for %%I in (fcc-bootstrap-context.exe) do set "FCC_BOOTSTRAP=%%~$PATH:I"
-    REM Resolve python from the same uv-tools environment
-    if exist "%FCC_SERVER%" (
-        for %%I in ("%FCC_SERVER%") do set "TOOLS_BIN=%%~dpI"
-        if exist "!TOOLS_BIN!python.exe" set "FCC_PY=!TOOLS_BIN!python.exe"
-        set "TOOLS_FROM=system"
+)
+
+REM --- Tier 1b: explicit search in known uv tool bin directories ---
+if not exist "%FCC_SERVER%" (
+    for %%D in ("%UV_BIN_DIRS:;=" "%") do (
+        if not exist "%FCC_SERVER%" (
+            if exist "%%~D\fcc-server.exe" (
+                set "FCC_SERVER=%%~D\fcc-server.exe"
+                set "FCC_CLAUDE=%%~D\fcc-claude.exe"
+                set "FCC_BOOTSTRAP=%%~D\fcc-bootstrap-context.exe"
+            )
+        )
     )
+)
+
+REM Resolve python and confirm system install is usable
+if exist "%FCC_SERVER%" (
+    for %%I in ("%FCC_SERVER%") do set "TOOLS_BIN=%%~dpI"
+    if exist "!TOOLS_BIN!python.exe" set "FCC_PY=!TOOLS_BIN!python.exe"
+    set "TOOLS_FROM=system"
 )
 
 REM --- Tier 2: fall back to repo venv if system tools not found ---
@@ -49,9 +77,12 @@ if "%TOOLS_FROM%"=="repo-venv" (
         if errorlevel 1 (
             echo.
             echo ================================================================
-            echo SEPCC tools are not installed yet and uv was not found.
+            echo SEPCC tools are not installed and uv was not found on PATH.
             echo.
-            echo You need to run the installer once:
+            echo Searched: where fcc-server ^(PATH^)
+            for %%D in ("%UV_BIN_DIRS:;=" "%") do echo            %%~D
+            echo.
+            echo Run the installer once to set everything up:
             echo   powershell -File "%FCC_REPO%\scripts\install.ps1"
             echo ================================================================
             echo.
@@ -67,45 +98,60 @@ if "%TOOLS_FROM%"=="repo-venv" (
         set /p BUILD_CHOICE="Proceed with setup? [Y/n] "
         if /i not "!BUILD_CHOICE!"=="" if /i not "!BUILD_CHOICE!"=="y" if /i not "!BUILD_CHOICE!"=="yes" (
             echo.
-            echo Skipped. You can set up later with:
-            echo   cd /d "%FCC_REPO%" ^&^& uv sync
+            echo Skipped. You can run this later with:
+            echo   cd /d "%FCC_REPO%" ^&^& uv sync --no-dev
             pause
             exit /b 0
         )
 
         cd /d "%FCC_REPO%"
 
-        REM Create venv if missing
+        REM Create venv if missing — capture stderr so we can diagnose
         if not exist "%VENV_SCRIPTS%\python.exe" (
             echo.
             echo Creating Python 3.14 virtual environment...
-            uv python install 3.14.0 2>nul
-            uv venv --python 3.14.0 .venv314 2>nul
-            if not exist "%VENV_SCRIPTS%\python.exe" (
-                echo Failed to create virtual environment.
+            uv python install 3.14 2>"%TEMP%\sepcc-py-error.txt"
+            if errorlevel 1 (
+                echo Python 3.14 install failed:
+                type "%TEMP%\sepcc-py-error.txt" 2>nul
+                del "%TEMP%\sepcc-py-error.txt" 2>nul
+                echo.
+                echo Try installing Python manually:
+                echo   uv python install 3.14
                 pause
                 exit /b 1
             )
+            del "%TEMP%\sepcc-py-error.txt" 2>nul
+
+            uv venv --python 3.14 .venv314 2>"%TEMP%\sepcc-venv-error.txt"
+            if not exist "%VENV_SCRIPTS%\python.exe" (
+                echo Venv creation failed:
+                type "%TEMP%\sepcc-venv-error.txt" 2>nul
+                del "%TEMP%\sepcc-venv-error.txt" 2>nul
+                pause
+                exit /b 1
+            )
+            del "%TEMP%\sepcc-venv-error.txt" 2>nul
+            echo Python environment created.
         )
 
-        REM Sync dependencies
+        REM Sync dependencies — capture both stdout and stderr
         echo Installing SEPCC dependencies...
-        uv sync --no-dev 2>"%TEMP%\sepcc-sync-error.txt"
+        uv sync --no-dev >"%TEMP%\sepcc-sync-out.txt" 2>&1
+        set "SYNC_ERR=%ERRORLEVEL%"
         if not exist "%FCC_SERVER%" (
             echo.
             echo ================================================================
-            echo Dependency installation failed.
+            echo Dependency installation failed ^(exit code !SYNC_ERR!^).
             echo.
-
-            REM Show what actually went wrong
-            echo Error details:
+            echo Full uv sync output:
             echo ----8<----
-            type "%TEMP%\sepcc-sync-error.txt" 2>nul
+            type "%TEMP%\sepcc-sync-out.txt" 2>nul
             echo ----8<----
             echo.
 
             REM Check if this looks like a network issue
-            findstr /i "connect timeout resolve refused unreachable SSL TLS certificate" "%TEMP%\sepcc-sync-error.txt" >nul 2>&1
+            findstr /i "connect timeout resolve refused unreachable SSL TLS certificate" "%TEMP%\sepcc-sync-out.txt" >nul 2>&1
             if not errorlevel 1 (
                 REM Verify: actually try to reach the internet
                 powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'https://github.com' -UseBasicParsing -TimeoutSec 5; exit 0 } catch { exit 1 }" >nul 2>&1
@@ -123,14 +169,17 @@ if "%TOOLS_FROM%"=="repo-venv" (
                     echo Your internet connection is working. This may be a
                     echo different issue — check the error details above.
                 )
+            ) else (
+                echo If the output above mentions a missing file or tool,
+                echo that dependency may need to be installed separately.
             )
             echo ================================================================
             echo.
-            del "%TEMP%\sepcc-sync-error.txt" 2>nul
+            del "%TEMP%\sepcc-sync-out.txt" 2>nul
             pause
             exit /b 1
         )
-        del "%TEMP%\sepcc-sync-error.txt" 2>nul
+        del "%TEMP%\sepcc-sync-out.txt" 2>nul
         echo Dependencies ready.
         set "TOOLS_FROM=repo-venv"
     )
