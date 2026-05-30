@@ -56,7 +56,7 @@ function Test-LocalDisk {
 
 function Save-ProjectsRoot {
     param([string] $Path)
-    $ConfigDir | New-Item -ItemType Directory -Force -ErrorAction Stop | Out-Null
+    New-Item -Path $ConfigDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
     $normalized = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     # Atomic write: temp file then rename
     $tmp = "$ConfigFile.tmp"
