@@ -1,5 +1,7 @@
 __pycache__
 .claude
+!templates/project/.claude/
+!templates/project/.claude/**
 .cursor
 .pytest_cache
 .ruff_cache

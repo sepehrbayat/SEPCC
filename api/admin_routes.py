@@ -145,6 +145,9 @@ async def admin_status(request: Request):
             provider_id: sorted(model_ids)
             for provider_id, model_ids in registry.cached_model_ids().items()
         }
+        provider_health = registry.health_snapshot()
+    else:
+        provider_health = []
     return {
         "status": "running",
         "host": settings.host,
@@ -153,6 +156,7 @@ async def admin_status(request: Request):
         "provider": settings.provider_type,
         "pending_fields": getattr(request.app.state, "admin_pending_fields", []),
         "provider_status": provider_config_status(),
+        "provider_health": provider_health,
         "cached_models": cached_models,
     }
 
@@ -181,12 +185,14 @@ async def test_provider(provider_id: str, request: Request):
         provider = registry.get(provider_id, settings)
         infos = await provider.list_model_infos()
     except Exception as exc:
+        registry.record_provider_failure(provider_id, exc)
         return {
             "provider_id": provider_id,
             "ok": False,
             "error_type": type(exc).__name__,
         }
     registry.cache_model_infos(provider_id, infos)
+    registry.record_provider_success(provider_id)
     return {
         "provider_id": provider_id,
         "ok": True,

@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from cli.claude_runtime import apply_claude_code_runtime_env, maybe_update_claude_code
 from core.trace import trace_event
 
 from .process_registry import kill_pid_tree_best_effort, register_pid, unregister_pid
@@ -111,6 +112,7 @@ class CLISession:
         """
         async with self._cli_lock:
             self._is_busy = True
+            await asyncio.to_thread(maybe_update_claude_code, self.claude_bin)
             env = os.environ.copy()
 
             env["ANTHROPIC_API_URL"] = self.api_url
@@ -118,8 +120,7 @@ class CLISession:
                 env["ANTHROPIC_BASE_URL"] = self.api_url[:-3]
             else:
                 env["ANTHROPIC_BASE_URL"] = self.api_url
-            env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
-            env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "190000"
+            apply_claude_code_runtime_env(env)
             env.pop("ANTHROPIC_API_KEY", None)
             if token := self.auth_token.strip():
                 env["ANTHROPIC_AUTH_TOKEN"] = token

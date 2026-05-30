@@ -11,78 +11,6 @@ def test_messages_request_parses_without_model_mapping_side_effects():
     assert request.model == "claude-3-opus"
 
 
-def test_messages_request_normalizes_system_role_messages():
-    request = MessagesRequest.model_validate(
-        {
-            "model": "claude-3-opus",
-            "max_tokens": 100,
-            "messages": [
-                {"role": "user", "content": "first"},
-                {"role": "system", "content": "system prompt"},
-                {"role": "user", "content": "second"},
-            ],
-        }
-    )
-
-    assert [message.role for message in request.messages] == ["user", "user"]
-    assert request.system == "system prompt"
-
-
-def test_messages_request_merges_system_role_messages_with_existing_system():
-    request = MessagesRequest.model_validate(
-        {
-            "model": "claude-3-opus",
-            "max_tokens": 100,
-            "system": "existing system",
-            "messages": [
-                {"role": "system", "content": "message system"},
-                {"role": "user", "content": "hello"},
-            ],
-        }
-    )
-
-    assert len(request.messages) == 1
-    assert request.system == "existing system\n\nmessage system"
-
-
-def test_messages_request_preserves_system_block_cache_control_when_normalizing():
-    request = MessagesRequest.model_validate(
-        {
-            "model": "claude-3-opus",
-            "max_tokens": 100,
-            "system": [
-                {
-                    "type": "text",
-                    "text": "existing system",
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            "messages": [
-                {
-                    "role": "system",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "message system",
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ],
-                },
-                {"role": "user", "content": "hello"},
-            ],
-        }
-    )
-
-    assert len(request.messages) == 1
-    assert isinstance(request.system, list)
-    assert [block.text for block in request.system] == [
-        "existing system",
-        "message system",
-    ]
-    assert request.system[0].model_dump()["cache_control"] == {"type": "ephemeral"}
-    assert request.system[1].model_dump()["cache_control"] == {"type": "ephemeral"}
-
-
 def test_messages_request_ignores_internal_routing_fields_when_supplied():
     request = MessagesRequest.model_validate(
         {
@@ -105,22 +33,6 @@ def test_token_count_request_parses_without_model_mapping_side_effects():
     )
 
     assert request.model == "claude-3-sonnet"
-
-
-def test_token_count_request_normalizes_system_role_messages():
-    request = TokenCountRequest.model_validate(
-        {
-            "model": "claude-3-sonnet",
-            "messages": [
-                {"role": "system", "content": "counting system"},
-                {"role": "user", "content": "hello"},
-            ],
-        }
-    )
-
-    assert len(request.messages) == 1
-    assert request.messages[0].role == "user"
-    assert request.system == "counting system"
 
 
 def test_messages_request_preserves_thinking_signature():

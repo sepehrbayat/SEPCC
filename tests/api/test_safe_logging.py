@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 
 from api import services as services_mod
 from api.models.anthropic import Message, MessagesRequest
@@ -63,6 +64,68 @@ def test_create_message_logs_full_payload_when_opt_in():
 
     keys = [c.args[0] for c in mock_debug.call_args_list if c.args]
     assert any(k == "FULL_PAYLOAD [{}]: {}" for k in keys)
+
+
+def test_create_message_uses_fallback_when_primary_provider_unavailable():
+    settings = Settings()
+    settings.model = "deepseek/deepseek-v4-pro"
+    settings.model_fallbacks = "open_router/fallback-model"
+    providers = {"open_router": MagicMock()}
+    requested: list[str] = []
+
+    def provider_getter(provider_id: str):
+        requested.append(provider_id)
+        return providers[provider_id]
+
+    service = ClaudeProxyService(
+        settings,
+        provider_getter=provider_getter,
+        provider_available=lambda provider_id: provider_id != "deepseek",
+    )
+    request = MessagesRequest(
+        model="claude-3-haiku-20240307",
+        max_tokens=10,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    service.create_message(request)
+
+    assert requested == ["open_router"]
+    providers["open_router"].preflight_stream.assert_called_once()
+    routed_request = providers["open_router"].preflight_stream.call_args.args[0]
+    assert routed_request.model == "fallback-model"
+
+
+@pytest.mark.asyncio
+async def test_create_message_reports_stream_error_sse_as_provider_failure():
+    settings = Settings()
+    settings.model = "deepseek/deepseek-v4-pro"
+    settings.model_haiku = None
+    reports: list[tuple[str, bool, str | None]] = []
+    mock_provider = MagicMock()
+
+    async def fake_stream(*_a, **_kw):
+        yield 'event: error\ndata: {"type":"error"}\n\n'
+
+    mock_provider.stream_response = fake_stream
+    service = ClaudeProxyService(
+        settings,
+        provider_getter=lambda _: mock_provider,
+        report_provider_health=lambda provider_id, ok, exc: reports.append(
+            (provider_id, ok, type(exc).__name__ if exc else None)
+        ),
+    )
+    request = MessagesRequest(
+        model="claude-3-haiku-20240307",
+        max_tokens=10,
+        messages=[Message(role="user", content="hi")],
+    )
+
+    response = service.create_message(request)
+    assert isinstance(response, StreamingResponse)
+    _ = [chunk async for chunk in response.body_iterator]
+
+    assert reports == [("deepseek", False, "RuntimeError")]
 
 
 def test_sse_builder_default_debug_has_no_serialized_json_content():

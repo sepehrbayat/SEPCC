@@ -49,6 +49,7 @@ def _make_settings(**overrides):
     mock.ollama_base_url = "http://localhost:11434"
     mock.nvidia_nim_proxy = ""
     mock.open_router_proxy = ""
+    mock.deepseek_proxy = ""
     mock.lmstudio_proxy = ""
     mock.llamacpp_proxy = ""
     mock.mistral_proxy = ""
@@ -67,6 +68,8 @@ def _make_settings(**overrides):
     mock.groq_proxy = ""
     mock.cerebras_api_key = ""
     mock.cerebras_proxy = ""
+    mock.auto_detect_system_proxy = False
+    mock.detected_system_proxy.return_value = ""
     mock.provider_rate_limit = 40
     mock.provider_rate_window = 60
     mock.provider_max_concurrency = 5
@@ -145,6 +148,56 @@ def test_opencode_go_catalog_uses_opencode_api_key() -> None:
 
     assert desc.credential_env == "OPENCODE_API_KEY"
     assert desc.credential_attr == "opencode_api_key"
+
+
+def test_build_provider_config_deepseek_uses_proxy_setting() -> None:
+    descriptor = PROVIDER_CATALOG["deepseek"]
+    settings = _make_settings(deepseek_proxy="http://127.0.0.1:10808")
+
+    config = build_provider_config(descriptor, settings)
+
+    assert config.proxy == "http://127.0.0.1:10808"
+
+
+def test_build_provider_config_uses_detected_system_proxy_when_provider_proxy_blank() -> (
+    None
+):
+    descriptor = PROVIDER_CATALOG["deepseek"]
+    settings = _make_settings(deepseek_proxy="")
+    settings.detected_system_proxy.return_value = "socks5://127.0.0.1:10808"
+
+    config = build_provider_config(descriptor, settings)
+
+    assert config.proxy == "socks5://127.0.0.1:10808"
+
+
+def test_provider_health_opens_circuit_after_repeated_failures() -> None:
+    registry = ProviderRegistry()
+
+    registry.record_provider_failure("deepseek", RuntimeError("one"))
+    assert registry.provider_available("deepseek") is True
+
+    registry.record_provider_failure("deepseek", RuntimeError("two"))
+
+    health = {item["provider_id"]: item for item in registry.health_snapshot()}[
+        "deepseek"
+    ]
+    assert health["status"] == "circuit_open"
+    assert health["available"] is False
+
+
+def test_provider_health_success_closes_circuit() -> None:
+    registry = ProviderRegistry()
+    registry.record_provider_failure("deepseek", RuntimeError("one"))
+    registry.record_provider_failure("deepseek", RuntimeError("two"))
+
+    registry.record_provider_success("deepseek")
+
+    health = {item["provider_id"]: item for item in registry.health_snapshot()}[
+        "deepseek"
+    ]
+    assert health["status"] == "healthy"
+    assert health["available"] is True
 
 
 def test_build_provider_config_opencode_go_uses_opencode_api_key() -> None:

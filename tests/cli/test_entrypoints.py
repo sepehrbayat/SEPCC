@@ -154,9 +154,15 @@ def test_cli_scripts_are_registered() -> None:
     )
 
     scripts = pyproject["project"]["scripts"]
+    assert scripts["fcc"] == "cli.fcc_cli:main"
+    assert scripts["sdc"] == "cli.fcc_cli:main"
     assert scripts["fcc-server"] == "cli.entrypoints:serve"
     assert scripts["free-claude-code"] == "cli.entrypoints:serve"
+    assert scripts["fcc-init"] == "cli.entrypoints:init"
     assert scripts["fcc-claude"] == "cli.entrypoints:launch_claude"
+    assert scripts["fcc-bootstrap-context"] == "cli.bootstrap_context:main"
+    assert scripts["fcc-context-query"] == "core.context.retrieval:main"
+    assert scripts["fcc-context-store"] == "core.context.storage:main"
 
 
 def test_schedule_open_admin_browser_opens_when_health_ready(
@@ -307,6 +313,7 @@ def test_claude_child_env_targets_current_proxy_config() -> None:
     assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
     assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+    assert env["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
     assert "ANTHROPIC_API_KEY" not in env
 
 
@@ -325,8 +332,30 @@ def test_claude_child_env_removes_blank_configured_auth_token() -> None:
     assert "ANTHROPIC_API_KEY" not in env
 
 
+def test_resolve_launch_workdir_uses_directory_argument(tmp_path: Path) -> None:
+    from cli.entrypoints import _resolve_launch_workdir
+
+    project = tmp_path / "my-app"
+    project.mkdir()
+
+    work_dir, args = _resolve_launch_workdir([str(project), "--model", "sonnet"])
+
+    assert work_dir == project.resolve()
+    assert args == ["--model", "sonnet"]
+
+
+def test_resolve_launch_workdir_keeps_current_directory_for_flags() -> None:
+    from cli.entrypoints import _resolve_launch_workdir
+
+    work_dir, args = _resolve_launch_workdir(["--model", "sonnet"])
+
+    assert work_dir == Path.cwd()
+    assert args == ["--model", "sonnet"]
+
+
 def test_launch_claude_passes_args_and_child_env(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     from cli.entrypoints import launch_claude
 
@@ -339,7 +368,9 @@ def test_launch_claude_passes_args_and_child_env(
         patch("cli.entrypoints.get_settings", return_value=settings),
         patch("cli.entrypoints._preflight_proxy", return_value=None),
         patch("cli.entrypoints.shutil.which", return_value="resolved-claude.cmd"),
+        patch("cli.entrypoints.maybe_update_claude_code") as update_claude,
         patch("cli.entrypoints.subprocess.Popen") as popen,
+        patch("cli.session_registry.process_is_running", return_value=False),
         patch("cli.entrypoints.register_pid") as register_pid,
         patch("cli.entrypoints.unregister_pid") as unregister_pid,
         pytest.raises(SystemExit) as exc_info,
@@ -347,22 +378,30 @@ def test_launch_claude_passes_args_and_child_env(
         process = popen.return_value
         process.pid = 12345
         process.wait.return_value = 7
-        launch_claude(["--model", "sonnet"])
+        launch_claude([str(tmp_path), "--model", "sonnet"], auto_resume=False)
 
     assert exc_info.value.code == 7
     popen.assert_called_once()
-    assert popen.call_args.args[0] == ["resolved-claude.cmd", "--model", "sonnet"]
+    assert popen.call_args.args[0] == [
+        "resolved-claude.cmd",
+        "--dangerously-skip-permissions",
+        "--model",
+        "sonnet",
+    ]
+    assert popen.call_args.kwargs["cwd"] == str(tmp_path)
     child_env = popen.call_args.kwargs["env"]
     assert child_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9191"
     assert child_env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
     assert child_env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert child_env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+    assert child_env["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
     assert child_env["KEEP_ME"] == "yes"
+    update_claude.assert_called_once_with("resolved-claude.cmd")
     register_pid.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
 
 
-def test_launch_claude_keyboard_interrupt_kills_child_tree() -> None:
+def test_launch_claude_keyboard_interrupt_kills_child_tree(tmp_path: Path) -> None:
     from cli.entrypoints import launch_claude
 
     settings = _launcher_settings(port=9191, token="proxy-token")
@@ -371,7 +410,9 @@ def test_launch_claude_keyboard_interrupt_kills_child_tree() -> None:
         patch("cli.entrypoints.get_settings", return_value=settings),
         patch("cli.entrypoints._preflight_proxy", return_value=None),
         patch("cli.entrypoints.shutil.which", return_value="resolved-claude.cmd"),
+        patch("cli.entrypoints.maybe_update_claude_code"),
         patch("cli.entrypoints.subprocess.Popen") as popen,
+        patch("cli.session_registry.process_is_running", return_value=False),
         patch("cli.entrypoints.register_pid"),
         patch("cli.entrypoints.kill_pid_tree_best_effort") as kill_tree,
         patch("cli.entrypoints.unregister_pid") as unregister_pid,
@@ -381,7 +422,7 @@ def test_launch_claude_keyboard_interrupt_kills_child_tree() -> None:
         process.pid = 12345
         process.wait.side_effect = [KeyboardInterrupt, 0]
 
-        launch_claude([])
+        launch_claude([str(tmp_path)], auto_resume=False)
 
     kill_tree.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
@@ -389,6 +430,7 @@ def test_launch_claude_keyboard_interrupt_kills_child_tree() -> None:
 
 def test_launch_claude_exits_when_command_cannot_be_resolved(
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     from cli.entrypoints import launch_claude
 
@@ -398,9 +440,10 @@ def test_launch_claude_exits_when_command_cannot_be_resolved(
         patch("cli.entrypoints._preflight_proxy", return_value=None),
         patch("cli.entrypoints.shutil.which", return_value=None),
         patch("cli.entrypoints.subprocess.Popen") as popen,
+        patch("cli.session_registry.process_is_running", return_value=False),
         pytest.raises(SystemExit) as exc_info,
     ):
-        launch_claude([])
+        launch_claude([str(tmp_path)], auto_resume=False)
 
     assert exc_info.value.code == 127
     popen.assert_not_called()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from typing import Any
 
 from fastapi import HTTPException
@@ -18,7 +18,7 @@ from core.trace import api_messages_request_snapshot, trace_event, traced_async_
 from providers.base import BaseProvider
 from providers.exceptions import InvalidRequestError, ProviderError
 
-from .model_router import ModelRouter
+from .model_router import ModelRouter, ResolvedModel, RoutedMessagesRequest
 from .models.anthropic import MessagesRequest, TokenCountRequest
 from .models.responses import TokenCountResponse
 from .optimization_handlers import try_optimizations
@@ -32,6 +32,8 @@ from .web_tools.streaming import stream_web_server_tool_response
 TokenCounter = Callable[[list[Any], str | list[Any] | None, list[Any] | None], int]
 
 ProviderGetter = Callable[[str], BaseProvider]
+ProviderHealthChecker = Callable[[str], bool]
+ProviderHealthReporter = Callable[[str, bool, BaseException | None], None]
 
 # Providers that use ``/chat/completions`` + Anthropic-to-OpenAI conversion (not native Messages).
 _OPENAI_CHAT_UPSTREAM_IDS = frozenset({"nvidia_nim", "opencode", "opencode_go"})
@@ -93,11 +95,17 @@ class ClaudeProxyService:
         provider_getter: ProviderGetter,
         model_router: ModelRouter | None = None,
         token_counter: TokenCounter = get_token_count,
+        provider_available: ProviderHealthChecker | None = None,
+        report_provider_health: ProviderHealthReporter | None = None,
     ):
         self._settings = settings
         self._provider_getter = provider_getter
         self._model_router = model_router or ModelRouter(settings)
         self._token_counter = token_counter
+        self._provider_available = provider_available or (lambda _provider_id: True)
+        self._report_provider_health = report_provider_health or (
+            lambda _provider_id, _ok, _exc: None
+        )
 
     def create_message(self, request_data: MessagesRequest) -> object:
         """Create a message response or streaming response."""
@@ -149,11 +157,16 @@ class ClaudeProxyService:
                 return optimized
             logger.debug("No optimization matched, routing to provider")
 
+            routed = self._select_available_route(routed)
             provider = self._provider_getter(routed.resolved.provider_id)
-            provider.preflight_stream(
-                routed.request,
-                thinking_enabled=routed.resolved.thinking_enabled,
-            )
+            try:
+                provider.preflight_stream(
+                    routed.request,
+                    thinking_enabled=routed.resolved.thinking_enabled,
+                )
+            except Exception as exc:
+                self._report_provider_health(routed.resolved.provider_id, False, exc)
+                raise
 
             trace_event(
                 stage="routing",
@@ -187,13 +200,17 @@ class ClaudeProxyService:
                     routed.request.tools,
                 )
 
-                streamed = traced_async_stream(
+                provider_stream = self._stream_with_provider_health(
                     provider.stream_response(
                         routed.request,
                         input_tokens=input_tokens,
                         request_id=request_id,
                         thinking_enabled=routed.resolved.thinking_enabled,
                     ),
+                    provider_id=routed.resolved.provider_id,
+                )
+                streamed = traced_async_stream(
+                    provider_stream,
                     stage="egress",
                     source="api",
                     complete_event="api.response.stream_completed",
@@ -217,6 +234,76 @@ class ClaudeProxyService:
                 status_code=_http_status_for_unexpected_service_exception(e),
                 detail=get_user_facing_error_message(e),
             ) from e
+
+    def _select_available_route(
+        self, routed: RoutedMessagesRequest
+    ) -> RoutedMessagesRequest:
+        """Return the first configured route whose provider circuit is available."""
+        unavailable: list[str] = []
+        for candidate in self._message_route_candidates(routed):
+            provider_id = candidate.resolved.provider_id
+            if self._provider_available(provider_id):
+                if candidate is not routed:
+                    trace_event(
+                        stage="routing",
+                        event="api.route.fallback_selected",
+                        source="api",
+                        from_provider=routed.resolved.provider_id,
+                        to_provider=provider_id,
+                        provider_model_ref=candidate.resolved.provider_model_ref,
+                    )
+                return candidate
+            unavailable.append(provider_id)
+
+        detail = (
+            "No configured provider route is currently available. "
+            f"Unavailable providers: {', '.join(unavailable)}"
+        )
+        raise HTTPException(status_code=503, detail=detail)
+
+    def _message_route_candidates(
+        self, routed: RoutedMessagesRequest
+    ) -> Iterable[RoutedMessagesRequest]:
+        yield routed
+        seen = {routed.resolved.provider_model_ref}
+        for fallback_ref in self._settings.fallback_model_refs():
+            if fallback_ref in seen:
+                continue
+            seen.add(fallback_ref)
+            provider_id = Settings.parse_provider_type(fallback_ref)
+            provider_model = Settings.parse_model_name(fallback_ref)
+            fallback_request = routed.request.model_copy(
+                update={"model": provider_model}, deep=True
+            )
+            yield RoutedMessagesRequest(
+                request=fallback_request,
+                resolved=ResolvedModel(
+                    original_model=routed.resolved.original_model,
+                    provider_id=provider_id,
+                    provider_model=provider_model,
+                    provider_model_ref=fallback_ref,
+                    thinking_enabled=routed.resolved.thinking_enabled,
+                ),
+            )
+
+    async def _stream_with_provider_health(
+        self, stream: AsyncIterator[str], *, provider_id: str
+    ) -> AsyncIterator[str]:
+        failed = False
+        try:
+            async for chunk in stream:
+                if _chunk_has_provider_error(chunk):
+                    failed = True
+                yield chunk
+        except Exception as exc:
+            self._report_provider_health(provider_id, False, exc)
+            raise
+        if failed:
+            self._report_provider_health(
+                provider_id, False, RuntimeError("provider_error_sse")
+            )
+        else:
+            self._report_provider_health(provider_id, True, None)
 
     def count_tokens(self, request_data: TokenCountRequest) -> TokenCountResponse:
         """Count tokens for a request after applying configured model routing."""
@@ -260,3 +347,11 @@ class ClaudeProxyService:
                     status_code=_http_status_for_unexpected_service_exception(e),
                     detail=get_user_facing_error_message(e),
                 ) from e
+
+
+def _chunk_has_provider_error(chunk: str) -> bool:
+    return (
+        "event: error" in chunk
+        or '"type":"error"' in chunk
+        or '"type": "error"' in chunk
+    )

@@ -64,12 +64,31 @@ def get_proxy_service(
     settings: Settings = Depends(get_settings),
 ) -> ClaudeProxyService:
     """Build the request service for route handlers."""
+    registry = getattr(request.app.state, "provider_registry", None)
+    provider_registry = registry if isinstance(registry, ProviderRegistry) else None
+
+    def report_provider_health(
+        provider_id: str, ok: bool, exc: BaseException | None
+    ) -> None:
+        if provider_registry is None:
+            return
+        if ok:
+            provider_registry.record_provider_success(provider_id)
+        elif exc is not None:
+            provider_registry.record_provider_failure(provider_id, exc)
+
     return ClaudeProxyService(
         settings,
         provider_getter=lambda provider_type: dependencies.resolve_provider(
             provider_type, app=request.app, settings=settings
         ),
         token_counter=get_token_count,
+        provider_available=(
+            provider_registry.provider_available
+            if provider_registry is not None
+            else None
+        ),
+        report_provider_health=report_provider_health,
     )
 
 

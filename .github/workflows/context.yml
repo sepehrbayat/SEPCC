@@ -1,0 +1,53 @@
+name: Context Bootstrap
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: context-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context-tests:
+    name: context-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: "0.11.17"
+          enable-cache: true
+          cache-python: true
+
+      - name: Install Python 3.14
+        run: uv python install 3.14.0
+
+      - name: Check template files
+        run: uv run python -m cli.bootstrap_context --check-template
+
+      - name: Run context tests
+        run: uv run pytest tests/context -q
+
+      - name: Wheel smoke
+        run: |
+          uv build --wheel --out-dir dist
+          python -m venv .wheel-smoke
+          . .wheel-smoke/bin/activate
+          python -m pip install dist/*.whl
+          fcc-bootstrap-context --check-template
+          mkdir -p /tmp/fcc-context-smoke
+          cd /tmp/fcc-context-smoke
+          fcc-bootstrap-context
+          printf '{}' | python scripts/hooks/session_start.py | python -m json.tool

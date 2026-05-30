@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, MutableMapping
 from contextlib import suppress
+from dataclasses import dataclass
 
 import httpx
 from loguru import logger
@@ -27,9 +29,51 @@ from providers.exceptions import (
 from providers.model_listing import ProviderModelInfo, model_infos_from_ids
 
 ProviderFactory = Callable[[ProviderConfig, Settings], BaseProvider]
+PROVIDER_CIRCUIT_FAILURE_THRESHOLD = 2
+PROVIDER_CIRCUIT_COOLDOWN_SECONDS = 60.0
 
 # Backwards-compatible name for the catalog (single source: ``config.provider_catalog``).
 PROVIDER_DESCRIPTORS: dict[str, ProviderDescriptor] = PROVIDER_CATALOG
+
+
+@dataclass(slots=True)
+class ProviderHealth:
+    """In-process health/circuit-breaker state for one provider."""
+
+    provider_id: str
+    status: str = "unknown"
+    consecutive_failures: int = 0
+    last_success_at: float | None = None
+    last_failure_at: float | None = None
+    last_error_type: str = ""
+    circuit_open_until: float | None = None
+
+    def is_available(self, now: float | None = None) -> bool:
+        now = time.time() if now is None else now
+        if self.circuit_open_until is None:
+            return True
+        if self.circuit_open_until <= now:
+            self.circuit_open_until = None
+            self.status = "unknown"
+            return True
+        return False
+
+    def snapshot(self, now: float | None = None) -> dict[str, object]:
+        now = time.time() if now is None else now
+        available = self.is_available(now)
+        status = self.status
+        if self.circuit_open_until is not None and self.circuit_open_until > now:
+            status = "circuit_open"
+        return {
+            "provider_id": self.provider_id,
+            "status": status,
+            "available": available,
+            "consecutive_failures": self.consecutive_failures,
+            "last_success_at": self.last_success_at,
+            "last_failure_at": self.last_failure_at,
+            "last_error_type": self.last_error_type,
+            "circuit_open_until": self.circuit_open_until,
+        }
 
 
 def _create_nvidia_nim(config: ProviderConfig, settings: Settings) -> BaseProvider:
@@ -173,6 +217,11 @@ def _string_attr(settings: Settings, attr_name: str | None, default: str = "") -
     return value if isinstance(value, str) else default
 
 
+def _detected_system_proxy(settings: Settings) -> str:
+    detected = settings.detected_system_proxy()
+    return detected if isinstance(detected, str) else ""
+
+
 def _credential_for(descriptor: ProviderDescriptor, settings: Settings) -> str:
     if descriptor.static_credential is not None:
         return descriptor.static_credential
@@ -201,6 +250,8 @@ def build_provider_config(
         settings, descriptor.base_url_attr, descriptor.default_base_url or ""
     )
     proxy = _string_attr(settings, descriptor.proxy_attr)
+    if not proxy and descriptor.credential_env is not None:
+        proxy = _detected_system_proxy(settings)
     return ProviderConfig(
         api_key=credential,
         base_url=base_url or descriptor.default_base_url,
@@ -305,6 +356,7 @@ class ProviderRegistry:
         self._providers = providers if providers is not None else {}
         self._model_ids_by_provider: dict[str, frozenset[str]] = {}
         self._model_infos_by_provider: dict[str, dict[str, ProviderModelInfo]] = {}
+        self._health_by_provider: dict[str, ProviderHealth] = {}
         self._model_list_refresh_task: asyncio.Task[None] | None = None
 
     def is_cached(self, provider_id: str) -> bool:
@@ -342,6 +394,43 @@ class ProviderRegistry:
         if info is None:
             return None
         return info.supports_thinking
+
+    def provider_available(self, provider_id: str) -> bool:
+        """Return whether the provider circuit allows a new request."""
+        return self._health(provider_id).is_available()
+
+    def record_provider_success(self, provider_id: str) -> None:
+        """Record a successful provider interaction."""
+        health = self._health(provider_id)
+        health.status = "healthy"
+        health.consecutive_failures = 0
+        health.last_success_at = time.time()
+        health.last_error_type = ""
+        health.circuit_open_until = None
+
+    def record_provider_failure(self, provider_id: str, exc: BaseException) -> None:
+        """Record a provider failure and open the circuit after repeated failures."""
+        health = self._health(provider_id)
+        health.status = "unhealthy"
+        health.consecutive_failures += 1
+        health.last_failure_at = time.time()
+        health.last_error_type = type(exc).__name__
+        if health.consecutive_failures >= PROVIDER_CIRCUIT_FAILURE_THRESHOLD:
+            health.status = "circuit_open"
+            health.circuit_open_until = time.time() + PROVIDER_CIRCUIT_COOLDOWN_SECONDS
+
+    def health_snapshot(self) -> list[dict[str, object]]:
+        """Return health state for configured/catalog providers."""
+        now = time.time()
+        return [
+            self._health(provider_id).snapshot(now)
+            for provider_id in SUPPORTED_PROVIDER_IDS
+        ]
+
+    def _health(self, provider_id: str) -> ProviderHealth:
+        return self._health_by_provider.setdefault(
+            provider_id, ProviderHealth(provider_id=provider_id)
+        )
 
     def cached_prefixed_model_refs(self) -> tuple[str, ...]:
         """Return cached provider models in user-selectable ``provider/model`` form."""
@@ -421,6 +510,7 @@ class ProviderRegistry:
             try:
                 provider = self.get(provider_id, settings)
             except Exception as exc:
+                self.record_provider_failure(provider_id, exc)
                 _log_model_discovery_failure(provider_id, exc, settings)
                 continue
             tasks[provider_id] = asyncio.create_task(provider.list_model_infos())
@@ -433,9 +523,11 @@ class ProviderRegistry:
             if isinstance(result, BaseException):
                 if isinstance(result, asyncio.CancelledError):
                     raise result
+                self.record_provider_failure(provider_id, result)
                 _log_model_discovery_failure(provider_id, result, settings)
                 continue
             self.cache_model_infos(provider_id, result)
+            self.record_provider_success(provider_id)
             logger.info(
                 "Provider model discovery cached: provider={} models={}",
                 provider_id,
@@ -455,6 +547,7 @@ class ProviderRegistry:
             try:
                 provider = self.get(provider_id, settings)
             except Exception as exc:
+                self.record_provider_failure(provider_id, exc)
                 failures.extend(
                     _format_provider_query_failures(provider_refs, exc, settings)
                 )
@@ -470,11 +563,13 @@ class ProviderRegistry:
                 if isinstance(result, BaseException):
                     if isinstance(result, asyncio.CancelledError):
                         raise result
+                    self.record_provider_failure(provider_id, result)
                     failures.extend(
                         _format_provider_query_failures(provider_refs, result, settings)
                     )
                     continue
                 self.cache_model_infos(provider_id, result)
+                self.record_provider_success(provider_id)
                 model_ids = self._model_ids_by_provider[provider_id]
                 failures.extend(
                     _format_missing_model_failure(ref)
@@ -520,6 +615,7 @@ class ProviderRegistry:
             self._providers.clear()
             self._model_ids_by_provider.clear()
             self._model_infos_by_provider.clear()
+            self._health_by_provider.clear()
         if len(errors) == 1:
             raise errors[0]
         if len(errors) > 1:

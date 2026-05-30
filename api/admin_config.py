@@ -273,6 +273,19 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         default="http://localhost:11434",
     ),
     ConfigFieldSpec(
+        "AUTO_DETECT_SYSTEM_PROXY",
+        "Auto Detect System Proxy",
+        "providers",
+        "boolean",
+        settings_attr="auto_detect_system_proxy",
+        default="true",
+        advanced=True,
+        description=(
+            "Use the OS proxy for remote providers when their provider-specific "
+            "proxy field is blank."
+        ),
+    ),
+    ConfigFieldSpec(
         "NVIDIA_NIM_PROXY",
         "NVIDIA NIM Proxy",
         "providers",
@@ -287,6 +300,15 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "providers",
         "secret",
         settings_attr="open_router_proxy",
+        secret=True,
+        advanced=True,
+    ),
+    ConfigFieldSpec(
+        "DEEPSEEK_PROXY",
+        "DeepSeek Proxy",
+        "providers",
+        "secret",
+        settings_attr="deepseek_proxy",
         secret=True,
         advanced=True,
     ),
@@ -412,8 +434,17 @@ FIELDS: tuple[ConfigFieldSpec, ...] = (
         "Default Model",
         "models",
         settings_attr="model",
-        default="nvidia_nim/z-ai/glm4.7",
+        default="deepseek/deepseek-v4-pro",
         description="Fallback provider/model route for all Claude model names.",
+    ),
+    ConfigFieldSpec(
+        "MODEL_FALLBACKS",
+        "Model Fallbacks",
+        "models",
+        settings_attr="model_fallbacks",
+        description=(
+            "Comma-separated provider/model refs used when a provider is marked unhealthy."
+        ),
     ),
     ConfigFieldSpec(
         "MODEL_OPUS",

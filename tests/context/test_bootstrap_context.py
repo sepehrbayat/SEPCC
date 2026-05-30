@@ -1,0 +1,522 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from cli.bootstrap_context import (
+    DEFAULT_CODE_RETRIEVAL_OWNER,
+    DEFAULT_MEMORY_OWNER,
+    BootstrapError,
+    bootstrap_context,
+    check_template,
+    ensure_single_memory_owner,
+    guard_duplicate_hook_owners,
+    guard_project_hook_owners,
+)
+from cli.context_doctor import run_agent_runtime_doctor
+from core.context.retrieval import query_index
+from core.context.sqlite_store import SQLiteContextStore
+from core.context.storage import store_context_output
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HOOKS_DIR = REPO_ROOT / "scripts" / "hooks"
+
+
+def run_hook(script_name: str, payload: dict[str, object]) -> dict[str, Any]:
+    result = subprocess.run(
+        [sys.executable, str(HOOKS_DIR / script_name)],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    output = json.loads(result.stdout)
+    assert isinstance(output, dict)
+    return output
+
+
+def write_transcript(path: Path, user_text: str, assistant_text: str) -> None:
+    rows = [
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "text", "text": user_text}],
+            },
+        },
+        {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": assistant_text}],
+            },
+        },
+    ]
+    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+
+
+def test_template_files_present() -> None:
+    assert check_template() == []
+
+
+def test_bootstrap_copies_template_and_local_file(tmp_path: Path) -> None:
+    report = bootstrap_context(tmp_path)
+
+    assert (tmp_path / "CLAUDE.md").is_file()
+    assert (tmp_path / "CLAUDE.local.md").is_file()
+    assert (tmp_path / ".claude" / "settings.json").is_file()
+    assert (tmp_path / ".fcc" / "context" / "agent-runtime.md").is_file()
+    assert (tmp_path / ".fcc" / "plugin-policy.yml").is_file()
+    assert (tmp_path / ".claude" / "agents" / "fcc-code-reviewer.md").is_file()
+    assert (tmp_path / "scripts" / "hooks" / "session_start.py").is_file()
+    assert "CLAUDE.local.md" in (tmp_path / ".gitignore").read_text("utf-8")
+    assert report.copied
+
+
+def test_bootstrap_merges_existing_claude_settings(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps({"permissions": {"allow": ["Bash(git status:*)"]}}),
+        encoding="utf-8",
+    )
+
+    bootstrap_context(tmp_path)
+
+    data = json.loads(settings.read_text("utf-8"))
+    assert data["permissions"]["allow"] == ["Bash(git status:*)"]
+    assert data["env"]["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
+    assert "SessionStart" in data["hooks"]
+
+
+def test_bootstrap_merges_token_savior_into_existing_mcp(tmp_path: Path) -> None:
+    mcp = tmp_path / ".mcp.json"
+    mcp.write_text(
+        json.dumps({"mcpServers": {"other": {"command": "other"}}}),
+        encoding="utf-8",
+    )
+
+    bootstrap_context(tmp_path)
+
+    data = json.loads(mcp.read_text("utf-8"))
+    assert data["mcpServers"]["other"]["command"] == "other"
+    assert data["mcpServers"]["token-savior"]["command"] == "uvx"
+
+
+def test_bootstrap_does_not_overwrite_non_empty_files(tmp_path: Path) -> None:
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("custom rules\n", encoding="utf-8")
+
+    report = bootstrap_context(tmp_path)
+
+    assert claude_md.read_text("utf-8") == "custom rules\n"
+    assert claude_md in report.skipped
+
+
+def test_bootstrap_force_preserves_local_facts_and_context(tmp_path: Path) -> None:
+    local_facts = tmp_path / "CLAUDE.local.md"
+    local_facts.write_text("- Local GPU server is llama-box.\n", encoding="utf-8")
+    context_dir = tmp_path / ".fcc" / "context"
+    context_dir.mkdir(parents=True)
+    handoff = context_dir / "handoff.md"
+    handoff.write_text("# Custom Handoff\n", encoding="utf-8")
+
+    bootstrap_context(tmp_path, force=True)
+
+    assert local_facts.read_text("utf-8") == "- Local GPU server is llama-box.\n"
+    assert handoff.read_text("utf-8") == "# Custom Handoff\n"
+
+
+def test_fact_recall_from_claude_local(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text("- FCC only.\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.local.md").write_text(
+        "- Local fact: Redis runs on port 6381.\n",
+        encoding="utf-8",
+    )
+    context_dir = tmp_path / ".fcc" / "context"
+    context_dir.mkdir(parents=True)
+    (context_dir / "agent-runtime.md").write_text(
+        "# FCC Agent Runtime\n- Runtime contract injected first.\n",
+        encoding="utf-8",
+    )
+    (context_dir / "handoff.md").write_text(
+        "# FCC Handoff\n\n## Must Not Forget\n- Keep MemSearch.\n",
+        encoding="utf-8",
+    )
+
+    output = run_hook("session_start.py", {"cwd": str(tmp_path)})
+
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "Runtime contract injected first" in context
+    assert "Redis runs on port 6381" in context
+    assert "FCC project context" in context
+
+
+def test_handoff_regeneration_on_stop(tmp_path: Path) -> None:
+    context_dir = tmp_path / ".fcc" / "context"
+    context_dir.mkdir(parents=True)
+    (context_dir / "facts.md").write_text(
+        "- Persistent memory owner: MemSearch.\n",
+        encoding="utf-8",
+    )
+    (context_dir / "handoff.md").write_text(
+        "# FCC Handoff\n\n## Must Not Forget\n- FCC remains the router.\n",
+        encoding="utf-8",
+    )
+    transcript = tmp_path / "session.jsonl"
+    write_transcript(
+        transcript,
+        "We decided to use SQLite FTS5 for large tool outputs.",
+        "Implemented stop hook regeneration and decision capture.",
+    )
+
+    output = run_hook(
+        "stop.py",
+        {"cwd": str(tmp_path), "transcript_path": str(transcript)},
+    )
+
+    handoff = (context_dir / "handoff.md").read_text("utf-8")
+    decisions = (context_dir / "decisions.md").read_text("utf-8")
+    assert output["systemMessage"] == "FCC handoff updated"
+    assert "FCC remains the router" in handoff
+    assert "SQLite FTS5" in handoff
+    assert "SQLite FTS5" in decisions
+
+
+def test_precompact_carries_only_must_not_forget(tmp_path: Path) -> None:
+    context_dir = tmp_path / ".fcc" / "context"
+    context_dir.mkdir(parents=True)
+    (context_dir / "handoff.md").write_text(
+        "\n".join(
+            [
+                "# FCC Handoff",
+                "",
+                "## Must Not Forget",
+                "- The billing fixture is local-only.",
+                "",
+                "## Current State",
+                "- This current-state line should not be injected.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output = run_hook("precompact.py", {"cwd": str(tmp_path)})
+
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "billing fixture" in context
+    assert "current-state line" in context
+
+
+@pytest.mark.parametrize(
+    ("script_name", "payload"),
+    [
+        ("session_start.py", {}),
+        ("user_prompt_submit.py", {"prompt": "please recall the handoff"}),
+        ("precompact.py", {}),
+        ("subagent_stop.py", {}),
+    ],
+)
+def test_hook_scripts_emit_valid_json(
+    tmp_path: Path,
+    script_name: str,
+    payload: dict[str, object],
+) -> None:
+    payload = {"cwd": str(tmp_path), **payload}
+    output = run_hook(script_name, payload)
+
+    assert output["suppressOutput"] is True
+
+
+def test_hook_runtime_error_still_emits_json(tmp_path: Path) -> None:
+    (tmp_path / ".fcc").write_text("not a directory", encoding="utf-8")
+
+    output = run_hook("stop.py", {"cwd": str(tmp_path)})
+
+    assert output["suppressOutput"] is True
+    assert "hook failed" in output["systemMessage"]
+
+
+def test_sqlite_retrieval_works(tmp_path: Path) -> None:
+    db_path = tmp_path / "context.sqlite"
+    store = SQLiteContextStore(db_path)
+    handle = store.store_output(
+        "pytest failed because the frobnicator timeout was too low",
+        kind="terminal",
+        source="pytest",
+    )
+
+    results = query_index("frobnicator timeout", db_path=db_path)
+
+    assert results
+    assert results[0]["handle"] == handle
+    assert "frobnicator" in str(results[0]["snippet"])
+
+
+def test_sqlite_store_cli_helper_works(tmp_path: Path) -> None:
+    db_path = tmp_path / "context.sqlite"
+    stored = store_context_output(
+        "mypy output mentioned contravariant widget adapters",
+        kind="terminal",
+        source="ty",
+        db_path=db_path,
+    )
+
+    results = query_index("contravariant widget", db_path=db_path)
+
+    assert stored["handle"] == results[0]["handle"]
+    assert isinstance(stored["chars"], int)
+    assert stored["chars"] > 0
+
+
+def test_sqlite_store_cli_writes_handle(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from core.context.storage import main as store_main
+
+    db_path = tmp_path / "context.sqlite"
+    content_file = tmp_path / "output.txt"
+    content_file.write_text(
+        "terminal output with unusual glacier token", encoding="utf-8"
+    )
+
+    store_main(
+        [
+            "--db",
+            str(db_path),
+            "--file",
+            str(content_file),
+            "--kind",
+            "terminal",
+            "--source",
+            "pytest",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["handle"]
+    assert query_index("glacier", db_path=db_path)[0]["handle"] == payload["handle"]
+
+
+def test_duplicate_hook_guard_fails_with_helpful_message(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {"hooks": [{"type": "command", "command": "memsearch watch"}]},
+                        {"hooks": [{"type": "command", "command": "claude-mem start"}]},
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BootstrapError, match="Duplicate hook owners"):
+        guard_duplicate_hook_owners(settings)
+
+
+def test_settings_local_hook_conflict_blocks_bootstrap(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude" / "settings.local.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {"hooks": [{"type": "command", "command": "memsearch watch"}]}
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BootstrapError, match="would conflict"):
+        guard_project_hook_owners(tmp_path)
+
+
+def test_custom_existing_hook_conflict_blocks_bootstrap(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python scripts/custom_stop.py",
+                                }
+                            ]
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BootstrapError, match="custom hook"):
+        bootstrap_context(tmp_path)
+
+
+def test_memsearch_and_claude_mem_defaults_are_mutually_exclusive() -> None:
+    assert DEFAULT_MEMORY_OWNER == "MemSearch"
+    assert DEFAULT_CODE_RETRIEVAL_OWNER == "Token Savior"
+    with pytest.raises(BootstrapError, match="cannot both"):
+        ensure_single_memory_owner(("MemSearch", "Claude-mem"))
+
+    template_text = (REPO_ROOT / "templates" / "project" / ".mcp.json").read_text(
+        "utf-8"
+    )
+    assert "claude-mem" not in template_text.lower()
+
+
+def test_user_prompt_submit_emits_routing_hint_for_large_review(tmp_path: Path) -> None:
+    output = run_hook(
+        "user_prompt_submit.py",
+        {
+            "cwd": str(tmp_path),
+            "prompt": "Review this multi-file change line by line and run tests.",
+        },
+    )
+
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "FCC routing hint" in context
+    assert "review" in context
+    assert "large task" in context
+
+
+def test_user_prompt_submit_skips_trivial_prompt(tmp_path: Path) -> None:
+    output = run_hook(
+        "user_prompt_submit.py",
+        {"cwd": str(tmp_path), "prompt": "ok thanks"},
+    )
+
+    assert "hookSpecificOutput" not in output
+
+
+def test_subagent_definitions_carry_fcc_runtime_awareness() -> None:
+    agents_dir = REPO_ROOT / "templates" / "project" / ".claude" / "agents"
+    for agent_path in agents_dir.glob("fcc-*.md"):
+        text = agent_path.read_text("utf-8")
+        assert "FCC" in text
+        assert "description:" in text
+        assert "Token Savior" in text or "Ralph Loop" in text or "handoff" in text
+
+
+def test_context_doctor_autofixes_runtime_files(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    for rel_path in (
+        Path(".fcc") / "context" / "agent-runtime.md",
+        Path(".fcc") / "plugin-policy.yml",
+        Path(".claude") / "agents" / "fcc-context-auditor.md",
+    ):
+        (tmp_path / rel_path).unlink()
+
+    report = run_agent_runtime_doctor(tmp_path)
+
+    assert report["runtime_contract_exists"] is True
+    assert report["plugin_policy_exists"] is True
+    assert report["agent_definitions_present"] is True
+    assert report["supported_hooks_configured"] is True
+    assert report["autofixed"]
+
+
+def test_context_doctor_detects_duplicate_hook_owners(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    settings = tmp_path / ".claude" / "settings.json"
+    data = json.loads(settings.read_text("utf-8"))
+    data["hooks"]["SessionStart"].append(
+        {"hooks": [{"type": "command", "command": "memsearch watch"}]}
+    )
+    settings.write_text(json.dumps(data), encoding="utf-8")
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["duplicate_hook_owners"] is True
+    assert report["issues"]
+
+
+def test_context_doctor_detects_bad_memory_policy(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    policy = tmp_path / ".fcc" / "plugin-policy.yml"
+    policy.write_text(
+        policy.read_text("utf-8").replace(
+            "persistent_memory: MemSearch",
+            "persistent_memory: Claude-mem",
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["memory_owner_valid"] is False
+
+
+def test_ralph_loop_policy_requires_bounded_verification(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    policy = tmp_path / ".fcc" / "plugin-policy.yml"
+    text = policy.read_text("utf-8")
+    policy.write_text(
+        text.replace("enabled: false", "enabled: true", 1).replace(
+            "max_iterations: 3",
+            "max_iterations: 0",
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["ralph_loop_policy_valid"] is False
+
+
+def test_missing_ralph_plugin_does_not_break_context_doctor(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["ralph_loop_policy_valid"] is True
+    assert report["issues"] == []
+
+
+def test_route_policy_uses_fcc_aliases_without_deepseek_names() -> None:
+    route_policy = (REPO_ROOT / ".fcc" / "router.yml").read_text("utf-8")
+    template_policy = (
+        REPO_ROOT / "templates" / "project" / ".fcc" / "router.yml"
+    ).read_text("utf-8")
+
+    for policy in (route_policy, template_policy):
+        assert "trivial:" in policy
+        assert "alias: haiku" in policy
+        assert "balanced:" in policy
+        assert "alias: sonnet" in policy
+        assert "deep:" in policy
+        assert "alias: opus" in policy
+        assert "deepseek" not in policy.lower()
+
+
+def test_mcp_template_uses_exact_token_savior_command() -> None:
+    data = json.loads((REPO_ROOT / "templates" / "project" / ".mcp.json").read_text())
+    server = data["mcpServers"]["token-savior"]
+
+    assert server["command"] == "uvx"
+    assert server["args"] == [
+        "--from",
+        "token-savior-recall==4.4.1",
+        "token-savior",
+        "server",
+    ]

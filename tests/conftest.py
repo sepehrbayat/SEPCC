@@ -16,6 +16,8 @@ os.environ["PTB_TIMEDELTA"] = "1"
 # Ensure tests don't pick up a server API key from the repo .env
 # (tests expect endpoints to be unauthenticated by default)
 os.environ["ANTHROPIC_AUTH_TOKEN"] = ""
+os.environ["FCC_SKIP_CLAUDE_CODE_UPDATE"] = "1"
+os.environ["FCC_AUTO_RESUME_LAST_SESSION"] = "false"
 
 Settings.model_config = {**Settings.model_config, "env_file": None}
 

@@ -82,7 +82,7 @@ function providerName(providerId) {
 function statusClass(status) {
   if (["configured", "reachable", "running"].includes(status)) return "ok";
   if (["missing_key", "missing_url", "unknown"].includes(status)) return "warn";
-  if (["offline", "error"].includes(status)) return "error";
+  if (["offline", "error", "unhealthy", "circuit_open"].includes(status)) return "error";
   return "neutral";
 }
 
@@ -108,6 +108,7 @@ async function load() {
   byId("configPath").textContent = config.paths.managed;
   await validate(false);
   await refreshLocalStatus();
+  await refreshRuntimeStatus();
   updateDirtyState();
   showMessage("");
 }
@@ -437,6 +438,23 @@ async function refreshLocalStatus() {
       ? `${provider.base_url} returned HTTP ${provider.status_code}`
       : provider.base_url;
     updateProviderCard(provider.provider_id, provider.status, provider.label, meta);
+  });
+}
+
+async function refreshRuntimeStatus() {
+  const result = await api("/admin/api/status");
+  (result.provider_health || []).forEach((provider) => {
+    if (provider.status === "unknown") return;
+    const label =
+      provider.status === "circuit_open"
+        ? "Circuit open"
+        : provider.status === "healthy"
+          ? "Healthy"
+          : "Unhealthy";
+    const meta =
+      provider.last_error_type ||
+      (provider.last_success_at ? "Last request succeeded" : "");
+    updateProviderCard(provider.provider_id, provider.status, label, meta);
   });
 }
 

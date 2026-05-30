@@ -3,7 +3,6 @@ set -eu
 
 REPO_GIT_URL="git+https://github.com/Alishahryar1/free-claude-code.git"
 PYTHON_VERSION="3.14.0"
-MIN_UV_VERSION="0.11.0"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
 dry_run=0
@@ -16,7 +15,7 @@ show_usage() {
     cat <<'USAGE'
 Usage: install.sh [options]
 
-Installs Claude Code if missing, installs or updates uv, Python 3.14.0, and Free Claude Code.
+Installs or updates Claude Code, uv, Python 3.14.0, and Free Claude Code.
 
 Options:
   --voice-nim              Install NVIDIA NIM voice transcription support.
@@ -100,121 +99,36 @@ require_command() {
     fi
 }
 
-current_uv_version() {
-    version=$(uv self version --short 2>/dev/null || true)
-    if [ -z "$version" ]; then
-        version=$(uv --version 2>/dev/null | sed 's/^uv //; s/ .*//' || true)
-    fi
-
-    [ -n "$version" ] || return 1
-    printf '%s\n' "$version"
-}
-
-version_ge() {
-    current=${1%%[-+]*}
-    minimum=${2%%[-+]*}
-
-    old_ifs=$IFS
-    IFS=.
-    set -- $current
-    current_major=${1:-0}
-    current_minor=${2:-0}
-    current_patch=${3:-0}
-    set -- $minimum
-    minimum_major=${1:-0}
-    minimum_minor=${2:-0}
-    minimum_patch=${3:-0}
-    IFS=$old_ifs
-
-    [ "$current_major" -gt "$minimum_major" ] && return 0
-    [ "$current_major" -lt "$minimum_major" ] && return 1
-    [ "$current_minor" -gt "$minimum_minor" ] && return 0
-    [ "$current_minor" -lt "$minimum_minor" ] && return 1
-    [ "$current_patch" -ge "$minimum_patch" ]
-}
-
-uv_version_satisfies_minimum() {
-    version=$(current_uv_version) || return 1
-    version_ge "$version" "$MIN_UV_VERSION"
-}
-
-validate_uv_version() {
-    [ "$dry_run" -eq 1 ] && return 0
-
-    version=$(current_uv_version) || fail "Unable to determine uv version."
-    if ! version_ge "$version" "$MIN_UV_VERSION"; then
-        fail "uv $MIN_UV_VERSION or newer is required; found uv $version. Upgrade uv with its installer or package manager, then rerun this installer."
-    fi
-}
-
-uv_self_update_supported() {
-    uv self update --dry-run >/dev/null 2>&1
-}
-
-uv_installed_by_homebrew() {
-    command -v brew >/dev/null 2>&1 && brew list --versions uv >/dev/null 2>&1
-}
-
-uv_installed_by_pipx() {
-    command -v pipx >/dev/null 2>&1 && pipx list 2>/dev/null | grep -Eq '(^|[[:space:]])package uv([[:space:]]|$)'
-}
-
-uv_installed_in_active_virtualenv() {
-    [ -n "${VIRTUAL_ENV:-}" ] || return 1
-
-    uv_path=$(command -v uv)
-    case "$uv_path" in
-        "$VIRTUAL_ENV"/*) return 0 ;;
-        *) return 1 ;;
-    esac
-}
-
-update_existing_uv() {
-    if uv_self_update_supported; then
-        run uv self update
-        return 0
-    fi
-
-    if uv_installed_by_homebrew; then
-        run brew upgrade uv
-        return 0
-    fi
-
-    if uv_installed_by_pipx; then
-        run pipx upgrade uv
-        return 0
-    fi
-
-    if uv_installed_in_active_virtualenv; then
-        run python -m pip install --upgrade uv
-        return 0
-    fi
-
-    if uv_version_satisfies_minimum; then
-        printf 'uv is already installed and satisfies >=%s; skipping automatic uv update because the install source was not detected.\n' "$MIN_UV_VERSION"
-        return 0
-    fi
-
-    version=$(current_uv_version 2>/dev/null || printf 'unknown')
-    fail "uv $MIN_UV_VERSION or newer is required; found uv $version. The existing uv install source was not detected. Upgrade uv manually with the package manager that installed it, then rerun this installer."
-}
-
-install_claude_if_missing() {
+install_or_update_claude() {
     if command -v claude >/dev/null 2>&1; then
-        printf 'Claude Code already found on PATH; skipping install.\n'
-        return 0
+        claude_path=$(command -v claude)
+        if command -v npm >/dev/null 2>&1 && npm_prefix=$(npm prefix -g 2>/dev/null); then
+            case "$claude_path" in
+                "$npm_prefix"/*)
+                    run npm install -g @anthropic-ai/claude-code@latest
+                    return 0
+                    ;;
+            esac
+        fi
+
+        if [ -n "${claude_path:-}" ]; then
+            run env CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1 "$claude_path" update
+            return 0
+        else
+            run npm install -g @anthropic-ai/claude-code@latest
+            return 0
+        fi
     fi
 
     require_command npm
-    run npm install -g @anthropic-ai/claude-code
+    run npm install -g @anthropic-ai/claude-code@latest
 }
 
 install_or_update_uv() {
     add_uv_to_path
 
     if command -v uv >/dev/null 2>&1; then
-        update_existing_uv
-        validate_uv_version
+        run uv self update
         return 0
     fi
 
@@ -224,8 +138,6 @@ install_or_update_uv() {
     if [ "$dry_run" -eq 0 ] && ! command -v uv >/dev/null 2>&1; then
         fail "uv was installed, but it is not available on PATH. Open a new terminal or add uv's bin directory to PATH."
     fi
-
-    validate_uv_version
 }
 
 parse_args() {
@@ -315,8 +227,8 @@ install_free_claude_code() {
 parse_args "$@"
 validate_args
 
-step "Installing Claude Code if missing"
-install_claude_if_missing
+step "Installing or updating Claude Code"
+install_or_update_claude
 
 step "Installing uv if missing, updating if present"
 install_or_update_uv

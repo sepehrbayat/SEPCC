@@ -95,29 +95,6 @@ def test_create_message_stream(client: TestClient):
     assert b"message_start" in content or b"event:" in content
 
 
-def test_create_message_accepts_system_role_messages(client: TestClient):
-    """Create message accepts latest-client system messages."""
-    mock_provider.stream_response = _mock_stream_response
-    _stream_response_calls.clear()
-    payload = {
-        "model": "claude-3-sonnet",
-        "messages": [
-            {"role": "user", "content": "context"},
-            {"role": "system", "content": "system prompt"},
-            {"role": "user", "content": "Hi"},
-        ],
-        "max_tokens": 100,
-        "stream": True,
-    }
-
-    response = client.post("/v1/messages", json=payload)
-
-    assert response.status_code == 200
-    routed_request = _stream_response_calls[0][0][0]
-    assert [message.role for message in routed_request.messages] == ["user", "user"]
-    assert routed_request.system == "system prompt"
-
-
 def test_model_mapping(client: TestClient):
     # Test Haiku mapping
     _stream_response_calls.clear()

@@ -15,6 +15,7 @@ from .constants import HTTP_CONNECT_TIMEOUT_DEFAULT
 from .nim import NimSettings
 from .paths import default_claude_workspace_path, managed_env_path
 from .provider_ids import SUPPORTED_PROVIDER_IDS
+from .system_proxy import detect_system_proxy
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,11 +29,13 @@ class ConfiguredChatModelRef:
 
 
 def _env_files() -> tuple[Path, ...]:
-    """Return env file paths in priority order (later overrides earlier)."""
-    files: list[Path] = [
-        Path(".env"),
-        managed_env_path(),
-    ]
+    """Return env file paths in priority order (later overrides earlier).
+
+    Only the managed ``~/.fcc/.env`` (and optional ``FCC_ENV_FILE``) are loaded by
+    default so a project's local ``.env`` (e.g. ``PORT=4000`` for an app server)
+    cannot override the proxy port or provider keys.
+    """
+    files: list[Path] = [managed_env_path()]
     if explicit := os.environ.get("FCC_ENV_FILE"):
         files.append(Path(explicit))
     return tuple(files)
@@ -180,7 +183,8 @@ class Settings(BaseSettings):
     # ==================== Model ====================
     # All Claude model requests are mapped to this single model (fallback)
     # Format: provider_type/model/name
-    model: str = "nvidia_nim/z-ai/glm4.7"
+    model: str = "deepseek/deepseek-v4-pro"
+    model_fallbacks: str = Field(default="", validation_alias="MODEL_FALLBACKS")
 
     # Per-model overrides (optional, falls back to MODEL)
     # Each can use a different provider
@@ -191,6 +195,7 @@ class Settings(BaseSettings):
     # ==================== Per-Provider Proxy ====================
     nvidia_nim_proxy: str = Field(default="", validation_alias="NVIDIA_NIM_PROXY")
     open_router_proxy: str = Field(default="", validation_alias="OPENROUTER_PROXY")
+    deepseek_proxy: str = Field(default="", validation_alias="DEEPSEEK_PROXY")
     mistral_proxy: str = Field(default="", validation_alias="MISTRAL_PROXY")
     codestral_proxy: str = Field(default="", validation_alias="CODESTRAL_PROXY")
     lmstudio_proxy: str = Field(default="", validation_alias="LMSTUDIO_PROXY")
@@ -204,6 +209,9 @@ class Settings(BaseSettings):
     gemini_proxy: str = Field(default="", validation_alias="GEMINI_PROXY")
     groq_proxy: str = Field(default="", validation_alias="GROQ_PROXY")
     cerebras_proxy: str = Field(default="", validation_alias="CEREBRAS_PROXY")
+    auto_detect_system_proxy: bool = Field(
+        default=True, validation_alias="AUTO_DETECT_SYSTEM_PROXY"
+    )
 
     # ==================== Provider Rate Limiting ====================
     provider_rate_limit: int = Field(default=40, validation_alias="PROVIDER_RATE_LIMIT")
@@ -228,10 +236,10 @@ class Settings(BaseSettings):
 
     # ==================== HTTP Client Timeouts ====================
     http_read_timeout: float = Field(
-        default=120.0, validation_alias="HTTP_READ_TIMEOUT"
+        default=300.0, validation_alias="HTTP_READ_TIMEOUT"
     )
     http_write_timeout: float = Field(
-        default=10.0, validation_alias="HTTP_WRITE_TIMEOUT"
+        default=60.0, validation_alias="HTTP_WRITE_TIMEOUT"
     )
     http_connect_timeout: float = Field(
         default=HTTP_CONNECT_TIMEOUT_DEFAULT,
@@ -331,6 +339,20 @@ class Settings(BaseSettings):
     # Set via env `ANTHROPIC_AUTH_TOKEN`. When empty, no auth is required.
     anthropic_auth_token: str = Field(
         default="", validation_alias="ANTHROPIC_AUTH_TOKEN"
+    )
+
+    # ==================== Terminal Session Resume ====================
+    fcc_auto_resume_last_session: bool = Field(
+        default=True, validation_alias="FCC_AUTO_RESUME_LAST_SESSION"
+    )
+    fcc_auto_resume_max_age_days: int = Field(
+        default=7, validation_alias="FCC_AUTO_RESUME_MAX_AGE_DAYS"
+    )
+    fcc_auto_resume_project_scoped: bool = Field(
+        default=True, validation_alias="FCC_AUTO_RESUME_PROJECT_SCOPED"
+    )
+    fcc_session_picker_on_ambiguous: bool = Field(
+        default=True, validation_alias="FCC_SESSION_PICKER_ON_AMBIGUOUS"
     )
 
     @model_validator(mode="before")
@@ -452,6 +474,14 @@ class Settings(BaseSettings):
             raise ValueError(f"Invalid provider: '{provider}'. Supported: {supported}")
         return v
 
+    @field_validator("model_fallbacks")
+    @classmethod
+    def validate_model_fallbacks(cls, v: str) -> str:
+        refs = [part.strip() for part in v.split(",") if part.strip()]
+        for ref in refs:
+            cls.validate_model_format(ref)
+        return ",".join(refs)
+
     @model_validator(mode="after")
     def check_nvidia_nim_api_key(self) -> Settings:
         if (
@@ -504,10 +534,21 @@ class Settings(BaseSettings):
             return self.model_sonnet
         return self.model
 
+    def fallback_model_refs(self) -> tuple[str, ...]:
+        """Return configured provider/model fallback refs in priority order."""
+        return tuple(part for part in self.model_fallbacks.split(",") if part)
+
+    def detected_system_proxy(self) -> str:
+        """Return the detected OS proxy URL when auto-detection is enabled."""
+        if not self.auto_detect_system_proxy:
+            return ""
+        return detect_system_proxy()
+
     def configured_chat_model_refs(self) -> tuple[ConfiguredChatModelRef, ...]:
         """Return unique configured chat provider/model refs with source env keys."""
         candidates = (
             ("MODEL", self.model),
+            ("MODEL_FALLBACKS", self.model_fallbacks),
             ("MODEL_OPUS", self.model_opus),
             ("MODEL_SONNET", self.model_sonnet),
             ("MODEL_HAIKU", self.model_haiku),
@@ -516,7 +557,13 @@ class Settings(BaseSettings):
         for source, model_ref in candidates:
             if model_ref is None:
                 continue
-            sources_by_ref.setdefault(model_ref, []).append(source)
+            refs = (
+                self.fallback_model_refs()
+                if source == "MODEL_FALLBACKS"
+                else (model_ref,)
+            )
+            for ref in refs:
+                sources_by_ref.setdefault(ref, []).append(source)
 
         return tuple(
             ConfiguredChatModelRef(

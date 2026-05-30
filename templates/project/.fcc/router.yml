@@ -1,0 +1,16 @@
+version: 1
+owner: fcc
+purpose: agent-guidance
+routes:
+  trivial:
+    alias: haiku
+    model: ${MODEL_HAIKU:-provider/haiku-placeholder}
+  balanced:
+    alias: sonnet
+    model: ${MODEL_SONNET:-provider/sonnet-placeholder}
+  deep:
+    alias: opus
+    model: ${MODEL_OPUS:-provider/opus-placeholder}
+notes:
+  - Keep exact upstream model names in FCC provider config when unknown.
+  - Do not add a second default routing proxy.

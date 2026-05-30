@@ -28,17 +28,19 @@ class TestSettings:
 
         monkeypatch.delenv("CLAUDE_WORKSPACE", raising=False)
         monkeypatch.delenv("MODEL", raising=False)
+        monkeypatch.delenv("MODEL_FALLBACKS", raising=False)
         monkeypatch.delenv("HTTP_READ_TIMEOUT", raising=False)
         monkeypatch.delenv("HTTP_CONNECT_TIMEOUT", raising=False)
         monkeypatch.setitem(Settings.model_config, "env_file", ())
         settings = Settings()
-        assert settings.model == "nvidia_nim/z-ai/glm4.7"
+        assert settings.model == "deepseek/deepseek-v4-pro"
+        assert settings.fallback_model_refs() == ()
         assert isinstance(settings.provider_rate_limit, int)
         assert isinstance(settings.provider_rate_window, int)
         assert isinstance(settings.nim.temperature, float)
         assert isinstance(settings.fast_prefix_detection, bool)
         assert isinstance(settings.enable_model_thinking, bool)
-        assert settings.http_read_timeout == 120.0
+        assert settings.http_read_timeout == 300.0
         assert settings.http_connect_timeout == HTTP_CONNECT_TIMEOUT_DEFAULT
         assert settings.enable_web_server_tools is False
         assert settings.log_raw_api_payloads is False
@@ -173,6 +175,21 @@ class TestSettings:
         assert isinstance(settings.model, str)
         assert len(settings.model) > 0
 
+    def test_model_fallbacks_from_env(self, monkeypatch):
+        """MODEL_FALLBACKS is parsed as ordered provider/model refs."""
+        from config.settings import Settings
+
+        monkeypatch.setenv(
+            "MODEL_FALLBACKS",
+            "deepseek/deepseek-v4-flash, open_router/deepseek/deepseek-r1",
+        )
+        settings = Settings()
+
+        assert settings.fallback_model_refs() == (
+            "deepseek/deepseek-v4-flash",
+            "open_router/deepseek/deepseek-r1",
+        )
+
     def test_base_url_constant(self):
         """Test NVIDIA_NIM_DEFAULT_BASE is a constant."""
         from providers.nvidia_nim import NVIDIA_NIM_DEFAULT_BASE
@@ -254,7 +271,7 @@ class TestSettings:
         monkeypatch.setitem(Settings.model_config, "env_file", ())
         settings = Settings()
         assert settings.http_connect_timeout == HTTP_CONNECT_TIMEOUT_DEFAULT
-        assert HTTP_CONNECT_TIMEOUT_DEFAULT == 10.0
+        assert HTTP_CONNECT_TIMEOUT_DEFAULT == 60.0
 
     def test_enable_model_thinking_from_env(self, monkeypatch):
         """ENABLE_MODEL_THINKING env var is loaded into settings."""
@@ -306,6 +323,26 @@ class TestSettings:
         assert settings.resolve_thinking("claude-sonnet-4-20250514") is False
         assert settings.resolve_thinking("claude-haiku-4-20250514") is False
         assert settings.resolve_thinking("unknown-model") is False
+
+    def test_cwd_dotenv_does_not_override_managed_proxy_port(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """A project .env PORT must not hijack the FCC proxy when cwd changes."""
+        from config.settings import Settings, get_settings
+
+        managed_env = tmp_path / "fcc" / ".env"
+        managed_env.parent.mkdir(parents=True)
+        managed_env.write_text('MODEL="deepseek/deepseek-chat"\n', encoding="utf-8")
+
+        project_env = tmp_path / "app" / ".env"
+        project_env.parent.mkdir(parents=True)
+        project_env.write_text("PORT=4000\n", encoding="utf-8")
+
+        monkeypatch.chdir(project_env.parent)
+        monkeypatch.setitem(Settings.model_config, "env_file", (managed_env,))
+        get_settings.cache_clear()
+
+        assert Settings().port == 8082
 
     def test_anthropic_auth_token_from_env_without_dotenv_key(self, monkeypatch):
         """ANTHROPIC_AUTH_TOKEN env var is loaded when dotenv does not define it."""

@@ -18,18 +18,27 @@ import uvicorn
 
 from api.admin_urls import local_admin_url, local_proxy_root_url
 from api.app import GracefulLifespanApp, create_app
+from cli.claude_runtime import apply_claude_code_runtime_env, maybe_update_claude_code
 from cli.process_registry import (
     kill_all_best_effort,
     kill_pid_tree_best_effort,
     register_pid,
     unregister_pid,
 )
+from cli.session_registry import (
+    SessionRegistry,
+    discover_latest_transcript,
+    resolve_project_root,
+)
+from cli.session_resume import build_resume_plan, choose_resume_session
 from config.paths import config_dir_path, legacy_env_paths, managed_env_path
 from config.settings import Settings, get_settings
+from core.context.handoff import regenerate_handoff
 
 PROXY_PREFLIGHT_PATH = "/health"
 PROXY_PREFLIGHT_TIMEOUT_SECONDS = 1.5
 SERVER_GRACEFUL_SHUTDOWN_SECONDS = 5
+HEARTBEAT_INTERVAL_SECONDS = 15
 
 
 def _load_env_template() -> str:
@@ -181,8 +190,7 @@ def _claude_child_env(
     }
     env.pop("ANTHROPIC_API_KEY", None)
     env["ANTHROPIC_BASE_URL"] = local_proxy_root_url(settings)
-    env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
-    env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "190000"
+    apply_claude_code_runtime_env(env)
     if token := settings.anthropic_auth_token.strip():
         env["ANTHROPIC_AUTH_TOKEN"] = token
     return env
@@ -208,7 +216,26 @@ def _preflight_proxy(proxy_root_url: str) -> str | None:
     return None
 
 
-def launch_claude(argv: Sequence[str] | None = None) -> None:
+def _resolve_launch_workdir(argv: Sequence[str]) -> tuple[Path, list[str]]:
+    """If the first argv entry is an existing directory, use it as Claude's workspace."""
+
+    args = list(argv)
+    if not args:
+        return Path.cwd(), args
+
+    candidate = Path(args[0]).expanduser()
+    if candidate.is_dir():
+        return candidate.resolve(), args[1:]
+
+    return Path.cwd(), args
+
+
+def launch_claude(
+    argv: Sequence[str] | None = None,
+    *,
+    resume_ref: str | None = None,
+    auto_resume: bool | None = None,
+) -> None:
     """Launch Claude Code with Free Claude Code proxy environment variables."""
 
     settings = get_settings()
@@ -221,7 +248,11 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
         print("Start it in another terminal with: fcc-server", file=sys.stderr)
         raise SystemExit(1)
 
-    args = list(sys.argv[1:] if argv is None else argv)
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    work_dir, args = _resolve_launch_workdir(raw_args)
+    project_root = resolve_project_root(work_dir)
+    registry = SessionRegistry(project_root)
+    registry.heal_stale_active_sessions()
     claude_command = shutil.which(settings.claude_cli_bin)
     if claude_command is None:
         print(
@@ -234,13 +265,82 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
         )
         raise SystemExit(127)
 
-    command = [claude_command, *args]
+    maybe_update_claude_code(claude_command)
+    resume_plan = None
+    if resume_ref is not None:
+        selected = choose_resume_session(
+            registry,
+            explicit_ref=resume_ref,
+            max_age_days=_settings_int(settings, "fcc_auto_resume_max_age_days", 7),
+            project_scoped=_settings_bool(
+                settings, "fcc_auto_resume_project_scoped", True
+            ),
+            picker_on_ambiguous=False,
+        )
+        if selected is None:
+            raise SystemExit(f"FCC session not found: {resume_ref}")
+        resume_plan = build_resume_plan(registry, selected)
+    elif _auto_resume_enabled(settings, args, auto_resume=auto_resume):
+        selected = choose_resume_session(
+            registry,
+            explicit_ref=None,
+            max_age_days=_settings_int(settings, "fcc_auto_resume_max_age_days", 7),
+            project_scoped=_settings_bool(
+                settings, "fcc_auto_resume_project_scoped", True
+            ),
+            picker_on_ambiguous=_settings_bool(
+                settings, "fcc_session_picker_on_ambiguous", True
+            ),
+        )
+        resume_plan = build_resume_plan(registry, selected)
+
+    command = [claude_command, "--dangerously-skip-permissions"]
+    parent_session_id = None
+    native_resume_id = None
+    provider, model = _provider_model_for_session(settings, resume_plan)
+    if resume_plan is not None and resume_plan.use_native_resume:
+        native_resume_id = resume_plan.native_session_id
+        command.extend(["--resume", native_resume_id or ""])
+    elif resume_plan is not None and resume_plan.continuity_prompt:
+        parent_session_id = resume_plan.parent_session_id
+        command.extend(["--append-system-prompt", resume_plan.continuity_prompt])
+    command.extend(args)
     env = _claude_child_env(settings, os.environ)
     process: subprocess.Popen[bytes] | None = None
+    session_record = (
+        resume_plan.session
+        if resume_plan is not None
+        and resume_plan.use_native_resume
+        and resume_plan.session is not None
+        else registry.create_terminal_session(
+            cwd=work_dir,
+            command=command,
+            provider=provider,
+            model=model,
+            parent_session_id=parent_session_id,
+            native_session_id=native_resume_id,
+            metadata={"argv": args, "resume_ref": resume_ref},
+        )
+    )
+    if resume_plan is not None and resume_plan.use_native_resume and session_record:
+        registry.update(
+            session_record.session_id,
+            status="active",
+            cwd=str(work_dir),
+            command=" ".join(command),
+            provider=provider,
+            model=model,
+        )
+    heartbeat_stop = threading.Event()
+    return_code: int | None = None
     try:
-        process = subprocess.Popen(command, env=env)
+        process = subprocess.Popen(command, env=env, cwd=str(work_dir))
         if process.pid:
             register_pid(process.pid)
+            registry.set_process(session_record.session_id, process.pid)
+            _start_session_heartbeat(
+                registry, session_record.session_id, heartbeat_stop
+            )
         return_code = process.wait()
     except FileNotFoundError:
         print(
@@ -256,9 +356,120 @@ def launch_claude(argv: Sequence[str] | None = None) -> None:
         if process is not None and process.pid:
             kill_pid_tree_best_effort(process.pid)
             process.wait()
+        return_code = 0
         raise
     finally:
+        heartbeat_stop.set()
         if process is not None and process.pid:
             unregister_pid(process.pid)
+        _finish_registered_terminal_session(
+            registry,
+            session_record.session_id,
+            project_root=project_root,
+            work_dir=work_dir,
+            started_at=session_record.started_at,
+            native_session_id=native_resume_id,
+            return_code=return_code,
+        )
 
     raise SystemExit(return_code)
+
+
+def _finish_registered_terminal_session(
+    registry: SessionRegistry,
+    session_id: str,
+    *,
+    project_root: Path,
+    work_dir: Path,
+    started_at: str,
+    native_session_id: str | None,
+    return_code: int | None,
+) -> None:
+    transcript = discover_latest_transcript(
+        project_root=project_root,
+        cwd=work_dir,
+        started_at=started_at,
+        native_session_id=native_session_id,
+    )
+    registry.finish_terminal_session(
+        session_id,
+        return_code=return_code,
+        transcript=transcript,
+    )
+    if transcript is not None:
+        try:
+            regenerate_handoff(project_root, transcript.path)
+        except OSError:
+            return
+
+
+def _start_session_heartbeat(
+    registry: SessionRegistry,
+    session_id: str,
+    stop_event: threading.Event,
+) -> None:
+    def heartbeat() -> None:
+        while not stop_event.wait(HEARTBEAT_INTERVAL_SECONDS):
+            registry.heartbeat(session_id)
+
+    threading.Thread(
+        target=heartbeat,
+        name=f"fcc-session-heartbeat-{session_id}",
+        daemon=True,
+    ).start()
+
+
+def _auto_resume_enabled(
+    settings: Settings,
+    args: list[str],
+    *,
+    auto_resume: bool | None,
+) -> bool:
+    if auto_resume is not None:
+        return auto_resume
+    if not _settings_bool(settings, "fcc_auto_resume_last_session", True):
+        return False
+    if args:
+        return False
+    return not _args_request_native_resume(args)
+
+
+def _args_request_native_resume(args: list[str]) -> bool:
+    native_resume_flags = {
+        "--resume",
+        "-r",
+        "--continue",
+        "-c",
+        "--session-id",
+        "--no-session-persistence",
+    }
+    return any(
+        arg in native_resume_flags
+        or any(arg.startswith(f"{flag}=") for flag in native_resume_flags)
+        for arg in args
+    )
+
+
+def _settings_bool(settings: Settings, name: str, default: bool) -> bool:
+    value = getattr(settings, name, default)
+    return bool(value)
+
+
+def _settings_int(settings: Settings, name: str, default: int) -> int:
+    value = getattr(settings, name, default)
+    try:
+        return int(value)
+    except TypeError:
+        return default
+
+
+def _provider_model_for_session(
+    settings: Settings,
+    resume_plan: object | None,
+) -> tuple[str, str]:
+    session = getattr(resume_plan, "session", None)
+    session_provider = getattr(session, "provider", None)
+    session_model = getattr(session, "model", None)
+    model = session_model or settings.model
+    provider = session_provider or Settings.parse_provider_type(model)
+    return str(provider), str(model)

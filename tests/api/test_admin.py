@@ -71,10 +71,11 @@ def test_admin_page_no_longer_renders_global_status_header(monkeypatch, tmp_path
     assert "modelBadge" not in response.text
 
 
-def test_admin_static_no_longer_fetches_global_status_header():
+def test_admin_static_fetches_runtime_status_only_for_provider_health():
     script = Path("api/admin_static/admin.js").read_text(encoding="utf-8")
 
-    assert 'api("/admin/api/status")' not in script
+    assert 'api("/admin/api/status")' in script
+    assert "provider_health" in script
     assert "updateHeader" not in script
     assert '"Running"' not in script
     assert "serverStatus" not in script

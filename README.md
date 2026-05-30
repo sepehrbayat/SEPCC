@@ -532,7 +532,10 @@ SEPCC/
 ├── messaging/             # Discord/Telegram adapters, sessions, voice
 ├── cli/                   # Package entry points and Claude process management
 ├── config/                # Settings, provider catalog, logging
-└── tests/                 # Unit and contract tests
+├── templates/             # Project bootstrap templates (context, hooks, agents)
+├── docs/                  # Context hardening and architecture documentation
+├── scripts/               # Install scripts and hook implementations
+└── tests/                 # Unit, contract, and smoke tests
 ```
 
 ### 2. Run From Source

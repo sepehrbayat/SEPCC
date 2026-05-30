@@ -92,6 +92,7 @@ PROVIDER_CATALOG: dict[str, ProviderDescriptor] = {
         credential_url="https://platform.deepseek.com/api_keys",
         credential_attr="deepseek_api_key",
         default_base_url=DEEPSEEK_ANTHROPIC_DEFAULT_BASE,
+        proxy_attr="deepseek_proxy",
         capabilities=("chat", "streaming", "tools", "thinking", "native_anthropic"),
     ),
     "mistral": ProviderDescriptor(
