@@ -28,6 +28,8 @@ class ClaudeCliConfig:
     plans_directory: str | None = None
     claude_bin: str = "claude"
     auth_token: str = ""
+    auto_prompt_enhancer: bool = True
+    prompt_enhancer_timeout: float = 12.0
 
 
 class CLISession:
@@ -43,6 +45,8 @@ class CLISession:
         auth_token: str = "",
         *,
         log_raw_cli_diagnostics: bool = False,
+        auto_prompt_enhancer: bool = True,
+        prompt_enhancer_timeout: float = 12.0,
     ):
         self.config = ClaudeCliConfig(
             workspace_path=os.path.normpath(os.path.abspath(workspace_path)),
@@ -51,6 +55,8 @@ class CLISession:
             plans_directory=plans_directory,
             claude_bin=claude_bin,
             auth_token=auth_token,
+            auto_prompt_enhancer=auto_prompt_enhancer,
+            prompt_enhancer_timeout=prompt_enhancer_timeout,
         )
         self.workspace = self.config.workspace_path
         self.api_url = self.config.api_url
@@ -59,6 +65,8 @@ class CLISession:
         self.claude_bin = self.config.claude_bin
         self.auth_token = self.config.auth_token
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
+        self._enhancer_enabled = auto_prompt_enhancer
+        self._enhancer_timeout = prompt_enhancer_timeout
         self.process: asyncio.subprocess.Process | None = None
         self.current_session_id: str | None = None
         self._is_busy = False
@@ -97,6 +105,21 @@ class CLISession:
         """Check if a task is currently running."""
         return self._is_busy
 
+    async def _maybe_enhance_prompt(self, prompt: str) -> str:
+        """Enhance the prompt using project context when auto enhancer is enabled."""
+        if not self._enhancer_enabled:
+            return prompt
+        try:
+            from core.prompt_enhancer import enhance_prompt
+
+            return await enhance_prompt(
+                prompt,
+                self.workspace,
+                timeout=self._enhancer_timeout,
+            )
+        except Exception:
+            return prompt
+
     async def start_task(
         self, prompt: str, session_id: str | None = None, fork_session: bool = False
     ) -> AsyncGenerator[dict]:
@@ -113,6 +136,7 @@ class CLISession:
         async with self._cli_lock:
             self._is_busy = True
             await asyncio.to_thread(maybe_update_claude_code, self.claude_bin)
+            prompt = await self._maybe_enhance_prompt(prompt)
             env = os.environ.copy()
 
             env["ANTHROPIC_API_URL"] = self.api_url

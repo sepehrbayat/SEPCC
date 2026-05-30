@@ -146,6 +146,29 @@ class ClaudeMessageHandler:
         if await dispatch_command(self, incoming, cmd_base):
             return
 
+        # /enhance command: enhance the prompt inline, then continue normal processing
+        text = incoming.text or ""
+        if text.startswith("/enhance ") or text == "/enhance":
+            stripped = text[len("/enhance") :].strip()
+            if not stripped:
+                await self.platform.queue_send_message(
+                    incoming.chat_id,
+                    self.format_status("✨", "Usage:", "/enhance <your prompt>"),
+                    fire_and_forget=False,
+                )
+                return
+            try:
+                from core.prompt_enhancer import enhance_prompt
+
+                enhanced = await enhance_prompt(
+                    stripped,
+                    getattr(self.cli_manager, "workspace", ""),
+                    timeout=getattr(self.cli_manager, "_prompt_enhancer_timeout", 12.0),
+                )
+                incoming.text = enhanced
+            except Exception:
+                incoming.text = stripped
+
         # Filter out status messages (our own messages)
         text = incoming.text or ""
         if any(text.startswith(p) for p in STATUS_MESSAGE_PREFIXES):

@@ -355,6 +355,17 @@ class Settings(BaseSettings):
         default=True, validation_alias="FCC_SESSION_PICKER_ON_AMBIGUOUS"
     )
 
+    # ==================== Auto Prompting Enhancer ====================
+    auto_prompt_enhancer: bool = Field(
+        default=True, validation_alias="AUTO_PROMPT_ENHANCER"
+    )
+    prompt_enhancer_timeout: float = Field(
+        default=12.0, validation_alias="PROMPT_ENHANCER_TIMEOUT"
+    )
+    prompt_enhancer_max_output_chars: int = Field(
+        default=2000, validation_alias="PROMPT_ENHANCER_MAX_OUTPUT_CHARS"
+    )
+
     @model_validator(mode="before")
     @classmethod
     def reject_removed_env_vars(cls, data: Any) -> Any:

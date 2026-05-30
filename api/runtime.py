@@ -253,6 +253,8 @@ class AppRuntime:
             auth_token=getattr(self.settings, "anthropic_auth_token", ""),
             log_raw_cli_diagnostics=self.settings.log_raw_cli_diagnostics,
             log_messaging_error_details=self.settings.log_messaging_error_details,
+            auto_prompt_enhancer=self.settings.auto_prompt_enhancer,
+            prompt_enhancer_timeout=self.settings.prompt_enhancer_timeout,
         )
 
         session_store = SessionStore(

@@ -33,6 +33,8 @@ class CLISessionManager:
         *,
         log_raw_cli_diagnostics: bool = False,
         log_messaging_error_details: bool = False,
+        auto_prompt_enhancer: bool = True,
+        prompt_enhancer_timeout: float = 12.0,
     ):
         """
         Initialize the session manager.
@@ -51,6 +53,8 @@ class CLISessionManager:
         self.auth_token = auth_token
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
         self._log_messaging_error_details = log_messaging_error_details
+        self._prompt_enhancer_enabled = auto_prompt_enhancer
+        self._prompt_enhancer_timeout = prompt_enhancer_timeout
 
         self._sessions: dict[str, CLISession] = {}
         self._pending_sessions: dict[str, CLISession] = {}
@@ -86,6 +90,8 @@ class CLISessionManager:
                 claude_bin=self.claude_bin,
                 auth_token=self.auth_token,
                 log_raw_cli_diagnostics=self._log_raw_cli_diagnostics,
+                auto_prompt_enhancer=self._prompt_enhancer_enabled,
+                prompt_enhancer_timeout=self._prompt_enhancer_timeout,
             )
             self._pending_sessions[temp_id] = new_session
 
