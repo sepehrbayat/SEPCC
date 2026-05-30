@@ -261,7 +261,7 @@ Add to `claudeCode.environmentVariables` in settings.json:
 { "name": "ANTHROPIC_BASE_URL", "value": "http://localhost:8082" },
 { "name": "ANTHROPIC_AUTH_TOKEN", "value": "freecc" },
 { "name": "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", "value": "1" },
-{ "name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "value": "190000" }
+{ "name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "value": "1000000" }
 ```
 
 ### JetBrains

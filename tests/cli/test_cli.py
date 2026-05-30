@@ -533,7 +533,7 @@ class TestCLISession:
             env = mock_exec.call_args.kwargs["env"]
             assert env["ANTHROPIC_AUTH_TOKEN"] == "proxy-token"
             assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
-            assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "190000"
+            assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
             assert env["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
             assert "ANTHROPIC_API_KEY" not in env
 
