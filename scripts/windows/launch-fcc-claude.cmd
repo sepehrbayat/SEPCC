@@ -222,6 +222,12 @@ if "%BOOTSTRAP_NEW%"=="1" (
 REM --------------------------------------------------------------------
 REM Phase 4: Launch Claude Code
 REM --------------------------------------------------------------------
-uv run fcc-claude "%FCC_PROJECT%"
-if errorlevel 1 pause
+where wt >nul 2>&1
+if not errorlevel 1 (
+    echo Starting in Windows Terminal...
+    wt -d "!FCC_PROJECT!" cmd /k "cd /d !FCC_REPO! && uv run fcc-claude ""!FCC_PROJECT!"""
+) else (
+    uv run fcc-claude "%FCC_PROJECT%"
+    if errorlevel 1 pause
+)
 endlocal

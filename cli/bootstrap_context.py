@@ -301,6 +301,8 @@ def ensure_claude_settings(path: Path, *, force: bool) -> None:
                 raise BootstrapError(f"{path} hooks.{event} must be a list.")
             if "FCC context" not in _owners_for_hook_entries(current_entries):
                 current_entries.extend(template_entries)
+            elif force:
+                _replace_fcc_hooks(current_entries, template_entries)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -476,6 +478,24 @@ def _owners_for_hook_entries(entries: Any) -> set[str]:
         if owner is not None:
             owners.add(owner)
     return owners
+
+
+def _replace_fcc_hooks(
+    entries: list[dict[str, Any]], template_entries: list[dict[str, Any]]
+) -> None:
+    """Replace FCC-owned hook entries in-place with current template entries."""
+    indices_to_remove: list[int] = []
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            continue
+        if "hooks" in entry and isinstance(entry["hooks"], list):
+            _replace_fcc_hooks(entry["hooks"], template_entries)
+        owners = _owners_for_hook_entries([entry])
+        if "FCC context" in owners:
+            indices_to_remove.append(i)
+    for i in reversed(indices_to_remove):
+        del entries[i]
+    entries.extend(template_entries)
 
 
 def _commands_from_hooks(node: Any) -> list[str]:
