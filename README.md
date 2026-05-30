@@ -29,6 +29,8 @@ A free and open-source proxy that gives you **unlimited Claude Code** access by 
 - [How it works](#how-it-works)
 - [V2Ray system proxy (port 10808)](#v2ray-system-proxy-port-10808)
 - [Windows Desktop Shortcut](#windows-desktop-shortcut)
+  - [Creating the shortcut](#creating-the-shortcut)
+  - [Zero-config first launch](#zero-config-first-launch-auto-dependency-installation)
   - [First-run setup](#first-run-setup)
   - [How it works](#how-it-works-1)
   - [Empty folder? No projects yet?](#empty-folder-no-projects-yet)

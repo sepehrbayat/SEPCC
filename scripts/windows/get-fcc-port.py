@@ -1,4 +1,4 @@
-"""Print the configured Free Claude Code proxy port (for Windows launchers)."""
+"""Print the configured SEPCC proxy port (for Windows launchers)."""
 
 from config.settings import get_settings
 

@@ -236,13 +236,13 @@ def launch_claude(
     resume_ref: str | None = None,
     auto_resume: bool | None = None,
 ) -> None:
-    """Launch Claude Code with Free Claude Code proxy environment variables."""
+    """Launch Claude Code with SEPCC proxy environment variables."""
 
     settings = get_settings()
     proxy_root_url = local_proxy_root_url(settings)
     if error := _preflight_proxy(proxy_root_url):
         print(
-            f"Free Claude Code proxy is not reachable at {proxy_root_url}: {error}",
+            f"SEPCC proxy is not reachable at {proxy_root_url}: {error}",
             file=sys.stderr,
         )
         print("Start it in another terminal with: fcc-server", file=sys.stderr)

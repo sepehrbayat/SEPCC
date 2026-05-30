@@ -1,4 +1,4 @@
-"""Shared filesystem paths for Free Claude Code configuration."""
+"""Shared filesystem paths for SEPCC configuration."""
 
 from pathlib import Path
 
