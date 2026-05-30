@@ -430,15 +430,51 @@ On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy s
 
 ### Creating the shortcut
 
-The repo doesn't include a `.lnk` file (they don't track well in git). Instead, after cloning, run this once:
+The repo doesn't include a `.lnk` file (they don't track well in git). Instead, after cloning, double-click this file in Explorer:
 
-```powershell
-pwsh scripts/windows/create-desktop-shortcut.ps1
+```
+scripts\windows\create-desktop-shortcut.bat
 ```
 
 This drops an `SEPCC.lnk` on your desktop pointing at `launch-fcc-claude.cmd`. The script resolves paths from its own location, so it works wherever you cloned the repo.
 
-If you move the repo later, just re-run the script — it overwrites the old shortcut with updated paths.
+If you move the repo later, just re-run the `.bat` — it overwrites the old shortcut with updated paths.
+
+### Zero-config first launch (auto dependency installation)
+
+The very first time you double-click the shortcut, **you don't need to have anything pre-installed** except a shell. The launcher checks everything and installs what's missing:
+
+1. **`uv` not found?** The launcher automatically runs `scripts/install.ps1` which downloads `uv`, Python 3.14, and all SEPCC dependencies. This only happens once.
+2. **Virtual environment missing?** It runs `uv python install 3.14.0` and `uv venv` to create `.venv314`.
+3. **SEPCC binaries missing?** It runs `uv sync` to compile and install `fcc-server`, `fcc-claude`, and `fcc-bootstrap-context`.
+
+After the first launch, everything is cached. Subsequent launches go straight to the proxy and project picker — no install step.
+
+If the launcher can't download anything (no internet, firewall, restricted network), it prints:
+
+```
+Dependency installation failed.
+
+It looks like a network connectivity issue. If you are
+behind a firewall or internet restriction, enable your
+proxy and try again:
+
+  Common proxy ports:
+    V2Ray / V2RayN  →  socks5://127.0.0.1:10808
+    Clash / Verge   →  http://127.0.0.1:7890
+    Shadowsocks     →  socks5://127.0.0.1:1080
+    V2Ray HTTP      →  http://127.0.0.1:10809
+    Generic HTTP    →  port 3128, 8118, or 8888
+
+After enabling your proxy, set it in the terminal:
+
+  set HTTP_PROXY=http://127.0.0.1:10809
+  set HTTPS_PROXY=http://127.0.0.1:10809
+
+Then run this shortcut again.
+```
+
+The launcher recognizes network errors (connection refused, timeout, DNS failure, TLS errors) and surfaces them with the right proxy ports. It checks the same well-known local proxy ports that SEPCC's `AUTO_DETECT_SYSTEM_PROXY` uses — the same mechanism documented in the [V2Ray section](#v2ray-system-proxy-port-10808) above.
 
 ### First-run setup
 

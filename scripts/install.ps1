@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$RepoGitUrl = "git+https://github.com/Alishahryar1/free-claude-code.git"
+$RepoGitUrl = "git+https://github.com/sepehrbayat/SEPCC.git"
 $PythonVersion = "3.14.0"
 $UvInstallUrl = "https://astral.sh/uv/install.ps1"
 
@@ -20,7 +20,7 @@ function Show-Usage {
     @"
 Usage: install.ps1 [options]
 
-Installs or updates Claude Code, uv, Python 3.14.0, and Free Claude Code.
+Installs or updates Claude Code, uv, Python 3.14.0, and SEPCC.
 
 Options:
   -VoiceNim              Install NVIDIA NIM voice transcription support.
@@ -182,15 +182,15 @@ function Get-PackageSpec {
     }
 
     if ($includeNim -and $includeLocal) {
-        return "free-claude-code[voice,voice_local] @ $RepoGitUrl"
+        return "sepcc[voice,voice_local] @ $RepoGitUrl"
     }
 
     if ($includeNim) {
-        return "free-claude-code[voice] @ $RepoGitUrl"
+        return "sepcc[voice] @ $RepoGitUrl"
     }
 
     if ($includeLocal) {
-        return "free-claude-code[voice_local] @ $RepoGitUrl"
+        return "sepcc[voice_local] @ $RepoGitUrl"
     }
 
     return $RepoGitUrl
@@ -231,8 +231,8 @@ Install-OrUpdateUv
 Write-Step "Installing Python $PythonVersion"
 Invoke-InstallCommand -FilePath "uv" -Arguments @("python", "install", $PythonVersion)
 
-Write-Step "Installing or updating Free Claude Code"
+Write-Step "Installing or updating SEPCC"
 Install-FreeClaudeCode
 
 Write-Host ""
-Write-Host "Free Claude Code is installed. Start the proxy with: fcc-server"
+Write-Host "SEPCC is installed. Start the proxy with: fcc-server"

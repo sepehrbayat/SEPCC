@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO_GIT_URL="git+https://github.com/Alishahryar1/free-claude-code.git"
+REPO_GIT_URL="git+https://github.com/sepehrbayat/SEPCC.git"
 PYTHON_VERSION="3.14.0"
 UV_INSTALL_URL="https://astral.sh/uv/install.sh"
 
@@ -15,7 +15,7 @@ show_usage() {
     cat <<'USAGE'
 Usage: install.sh [options]
 
-Installs or updates Claude Code, uv, Python 3.14.0, and Free Claude Code.
+Installs or updates Claude Code, uv, Python 3.14.0, and SEPCC.
 
 Options:
   --voice-nim              Install NVIDIA NIM voice transcription support.
@@ -204,11 +204,11 @@ package_spec() {
     fi
 
     if [ "$include_nim" -eq 1 ] && [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice,voice_local] @ %s' "$REPO_GIT_URL"
+        printf 'sepcc[voice,voice_local] @ %s' "$REPO_GIT_URL"
     elif [ "$include_nim" -eq 1 ]; then
-        printf 'free-claude-code[voice] @ %s' "$REPO_GIT_URL"
+        printf 'sepcc[voice] @ %s' "$REPO_GIT_URL"
     elif [ "$include_local" -eq 1 ]; then
-        printf 'free-claude-code[voice_local] @ %s' "$REPO_GIT_URL"
+        printf 'sepcc[voice_local] @ %s' "$REPO_GIT_URL"
     else
         printf '%s' "$REPO_GIT_URL"
     fi
@@ -236,7 +236,7 @@ install_or_update_uv
 step "Installing Python $PYTHON_VERSION"
 run uv python install "$PYTHON_VERSION"
 
-step "Installing or updating Free Claude Code"
+step "Installing or updating SEPCC"
 install_free_claude_code
 
-printf '\nFree Claude Code is installed. Start the proxy with: fcc-server\n'
+printf '\nSEPCC is installed. Start the proxy with: fcc-server\n'
