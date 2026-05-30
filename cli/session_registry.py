@@ -800,13 +800,13 @@ def _excerpt(text: str, *, limit: int = 240) -> str:
 def _slugify(text: str | None) -> str | None:
     if not text:
         return None
-    words = []
-    for raw in text.lower().replace("_", "-").split():
-        cleaned = "".join(ch for ch in raw if ch.isalnum() or ch == "-").strip("-")
+    words: list[str] = []
+    for raw in text.split():
+        cleaned = "".join(ch for ch in raw if ch.isalnum()).strip()
         if cleaned:
             words.append(cleaned)
-        if len(words) >= 5:
+        if len(words) >= 4:
             break
     if not words:
         return None
-    return "-".join(words)[:64]
+    return " ".join(words)[:80]

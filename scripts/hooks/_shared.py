@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -158,6 +159,47 @@ def extract_section(text: str, heading: str) -> str:
         if capture:
             lines.append(line)
     return "\n".join(lines).strip()
+
+
+def session_name_from_prompt(prompt: str) -> str:
+    """Return the first 3-4 words of a prompt as a human-readable session name."""
+    words: list[str] = []
+    for raw in prompt.strip().split():
+        cleaned = "".join(ch for ch in raw if ch.isalnum()).strip()
+        if cleaned:
+            words.append(cleaned)
+        if len(words) >= 4:
+            break
+    if not words:
+        return ""
+    return " ".join(words)
+
+
+def name_active_session(root: Path, name: str) -> None:
+    """Set the name of the active session in the SQLite registry, if unnamed."""
+    if not name:
+        return
+    db = root / ".fcc" / "sessions.sqlite"
+    if not db.is_file():
+        return
+    try:
+        conn = sqlite3.connect(str(db))
+        cursor = conn.execute(
+            "SELECT session_id FROM sessions "
+            "WHERE name IS NULL AND status = 'active' "
+            "ORDER BY started_at DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        if row:
+            conn.execute(
+                "UPDATE sessions SET name = ?, current_task_title = ? "
+                "WHERE session_id = ?",
+                (name, name, row[0]),
+            )
+            conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
 
 _RECALL_TERMS = (
