@@ -7,8 +7,8 @@ The upstream repo is most useful as a curated index of Claude Code practices. It
 ## Integrated
 
 - Global Codex skill: `dan-agent-accuracy`
-  - Canonical path: `C:\Users\sepehr\.agents\skills\dan-agent-accuracy`
-  - Active Codex bridge: `C:\Users\sepehr\.codex\skills\dan-agent-accuracy`
+  - Canonical path: `~/.agents/skills/dan-agent-accuracy` (Windows: `%USERPROFILE%\.agents\skills\dan-agent-accuracy`)
+  - Active Codex bridge: `~/.codex/skills/dan-agent-accuracy` (Windows: `%USERPROFILE%\.codex\skills\dan-agent-accuracy`)
   - Purpose: context priming, resource adoption review, bug/PR workflows, browser QA, verification ladder, and durable memory guidance.
 
 - Global custom agents:
