@@ -160,10 +160,21 @@ class ClaudeMessageHandler:
             try:
                 from core.prompt_enhancer import enhance_prompt
 
+                cli = self.cli_manager
+                workspace = getattr(cli, "workspace", "")
+                api_url = (
+                    getattr(cli, "api_url", "http://127.0.0.1:8080/v1").removesuffix(
+                        "/v1"
+                    )
+                    + "/v1/messages"
+                )
+                api_key = getattr(cli, "auth_token", "").strip()
                 enhanced = await enhance_prompt(
                     stripped,
-                    getattr(self.cli_manager, "workspace", ""),
-                    timeout=getattr(self.cli_manager, "_prompt_enhancer_timeout", 12.0),
+                    workspace,
+                    api_url=api_url,
+                    api_key=api_key,
+                    timeout=getattr(cli, "_prompt_enhancer_timeout", 12.0),
                 )
                 incoming.text = enhanced
             except Exception:

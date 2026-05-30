@@ -15,7 +15,6 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from config.settings import get_settings
 from core.trace import trace_event
 
 _CONTEXT_FILES = (
@@ -103,20 +102,19 @@ def _build_enhancement_request(
     }
 
 
-async def _call_enhancement_llm(request_body: dict[str, Any], timeout: float) -> str:
+async def _call_enhancement_llm(
+    request_body: dict[str, Any], timeout: float, *, api_url: str, api_key: str
+) -> str:
     """Call the proxy's Messages API, stream SSE response, collect text."""
-    settings = get_settings()
-    url = f"http://127.0.0.1:{settings.port}/v1/messages"
-
     headers: dict[str, str] = {"Content-Type": "application/json"}
-    if token := settings.anthropic_auth_token.strip():
-        headers["x-api-key"] = token
+    if api_key:
+        headers["x-api-key"] = api_key
 
     async with (
         httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client,
         client.stream(
             "POST",
-            url,
+            api_url,
             json=request_body,
             headers=headers,
         ) as response,
@@ -154,6 +152,8 @@ async def enhance_prompt(
     prompt: str,
     workspace_path: str,
     *,
+    api_url: str = "http://127.0.0.1:8080/v1/messages",
+    api_key: str = "",
     timeout: float = 12.0,
     max_output_chars: int = 2000,
 ) -> str:
@@ -168,7 +168,10 @@ async def enhance_prompt(
 
     try:
         enhanced = await asyncio.wait_for(
-            _call_enhancement_llm(request_body, timeout), timeout=timeout
+            _call_enhancement_llm(
+                request_body, timeout, api_url=api_url, api_key=api_key
+            ),
+            timeout=timeout,
         )
     except TimeoutError:
         logger.warning(

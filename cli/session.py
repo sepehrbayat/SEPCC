@@ -115,6 +115,8 @@ class CLISession:
             return await enhance_prompt(
                 prompt,
                 self.workspace,
+                api_url=self.api_url.removesuffix("/v1") + "/v1/messages",
+                api_key=self.auth_token.strip(),
                 timeout=self._enhancer_timeout,
             )
         except Exception:
