@@ -1,70 +1,95 @@
 <div align="center">
 
-# 🤖 Free Claude Code
+# 🚀 SEPCC — Unlimited Cloud Code
 
-Use Claude Code CLI, VS Code, JetBrains ACP, or chat bots through your own Anthropic-compatible proxy.
+**SEPCC (Software-Enabled Proxy for Claude Code)** — the **Unlimited Cloud Code** platform. Use Claude Code CLI, VS Code, JetBrains ACP, or chat bots through your own Anthropic-compatible proxy with **zero usage limits**. Free, open-source, and provider-agnostic.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json&style=for-the-badge)](https://github.com/astral-sh/uv)
-[![Tested with Pytest](https://img.shields.io/badge/testing-Pytest-00c0ff.svg?style=for-the-badge)](https://github.com/Alishahryar1/free-claude-code/actions/workflows/tests.yml)
-[![Type checking: Ty](https://img.shields.io/badge/type%20checking-ty-ffcc00.svg?style=for-the-badge)](https://pypi.org/project/ty/)
 [![Code style: Ruff](https://img.shields.io/badge/code%20formatting-ruff-f5a623.svg?style=for-the-badge)](https://github.com/astral-sh/ruff)
 [![Logging: Loguru](https://img.shields.io/badge/logging-loguru-4ecdc4.svg?style=for-the-badge)](https://github.com/Delgan/loguru)
 
-Free Claude Code routes Anthropic Messages API traffic from Claude Code to any provider. It keeps Claude Code's client-side protocol stable while letting you choose free, paid, or local models.
+**Unlimited Cloud Code** is a free AI coding proxy that routes Anthropic Messages API traffic from Claude Code to any provider — giving you **unlimited access to AI-powered coding** through free, paid, or local models. No rate limits, no per-message billing, no vendor lock-in.
 
-[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-claude-code) · [Integrations](#optional-integrations) · [Development](#development)
+*Forked from [Free Claude Code](https://github.com/Alishahryar1/free-claude-code) by Ali Khokhar.*
+
+[Quick Start](#quick-start) · [Providers](#choose-a-provider) · [Clients](#connect-claude-code) · [Integrations](#optional-integrations) · [Development](#development) · [License & Attributions](#license-and-attributions)
 
 </div>
 
 <div align="center">
-  <img src="assets/pic.png" alt="Free Claude Code in action" width="700">
+  <img src="assets/pic.png" alt="SEPCC Unlimited Cloud Code in action" width="700">
 </div>
 
 ## Star History
 
 <div align="center">
-  <a href="https://star-history.com/#Alishahryar1/free-claude-code&Date">
+  <a href="https://star-history.com/#sepehrbayat/SEPCC&Date">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date&theme=dark">
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date">
-      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Alishahryar1/free-claude-code&type=Date" width="700">
+      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=sepehrbayat/SEPCC&type=Date&theme=dark">
+      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=sepehrbayat/SEPCC&type=Date">
+      <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=sepehrbayat/SEPCC&type=Date" width="700">
     </picture>
   </a>
 </div>
 
+---
+
+## What is SEPCC Unlimited Cloud Code?
+
+**SEPCC (Unlimited Cloud Code)** is a drop-in proxy that lets you use Claude Code — Anthropic's flagship AI coding assistant — while routing all API traffic through your own backend providers. This means **unlimited coding sessions** without Anthropic API quotas, per-token charges, or usage caps.
+
+### Why Unlimited Cloud Code?
+
+| Feature | SEPCC Unlimited Cloud Code | Standard Claude Code |
+|---------|---------------------------|---------------------|
+| **Usage limits** | None (your provider, your rules) | Anthropic rate limits |
+| **Per-message cost** | Free with free-tier providers | Pay-per-token |
+| **Provider choice** | 17+ backends | Anthropic only |
+| **Model mixing** | Route Opus/Sonnet/Haiku to different providers | Single provider |
+| **Local models** | LM Studio, llama.cpp, Ollama | Not supported |
+| **Offline coding** | Yes (local models) | No |
+| **Discord/Telegram bots** | Built-in | Not available |
+| **Voice notes** | Whisper + NVIDIA NIM | Not available |
+
 ## What You Get
 
-- Drop-in proxy for Claude Code's Anthropic API calls.
-- Seventeen provider backends: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
-- Per-model routing: send Opus, Sonnet, Haiku, and fallback traffic to different providers.
-- Native Claude Code `/model` picker support through the proxy's `/v1/models` endpoint (Claude Code must opt in to Gateway model discovery; see [Model Picker](#model-picker)).
-- Streaming, tool use, reasoning/thinking block handling, and local request optimizations.
-- Optional Discord or Telegram bot wrapper for remote coding sessions.
-- Optional Usage through the VSCode extension.
-- Optional voice-note transcription through local Whisper or NVIDIA NIM.
-- Local **Admin UI** at `/admin` to edit supported proxy settings, validate changes, and check providers (loopback access only).
+- **Unlimited Cloud Code** — drop-in proxy for Claude Code's Anthropic API calls with no usage caps.
+- **Seventeen provider backends**: NVIDIA NIM, OpenRouter, Google AI Studio (Gemini), DeepSeek, Mistral La Plateforme, Mistral Codestral, OpenCode Zen, OpenCode Go, Wafer, Kimi, Cerebras Inference, Groq, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama.
+- **Per-model routing**: send Opus, Sonnet, Haiku, and fallback traffic to different providers for maximum flexibility.
+- **Native Claude Code `/model` picker** support through the proxy's `/v1/models` endpoint (Claude Code must opt in to Gateway model discovery; see [Model Picker](#model-picker)).
+- **Streaming, tool use, reasoning/thinking block handling**, and local request optimizations for blazing-fast responses.
+- **Optional Discord or Telegram bot** wrapper for remote coding sessions on the go.
+- **Optional VS Code extension** integration for IDE-based unlimited cloud coding.
+- **Optional voice-note transcription** through local Whisper or NVIDIA NIM.
+- **Local Admin UI** at `/admin` to edit proxy settings, validate changes, and check providers (loopback access only).
+
+### Subagent Architecture
+
+SEPCC supports Claude Code's subagent system through project agent definitions and the `SubagentStop` hook — the [officially documented](https://docs.anthropic.com/en/docs/claude-code/hooks) stable hook for subagent lifecycle management. Official Claude Code docs list `SubagentStop`, not a stable `SubagentStart`, so subagent startup awareness is provided through project agent definitions and supported hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `SubagentStop`). Subagents inherit operating rules from their project agent definitions, and `SubagentStop` refreshes handoff state after delegated work completes.
+
+Sources: [Claude Code Hooks documentation](https://docs.anthropic.com/en/docs/claude-code/hooks), [Claude Code Subagents documentation](https://docs.anthropic.com/en/docs/claude-code/subagents).
+
+---
 
 ## Quick Start
 
 ### 1. Fast Install
 
-Install Claude Code if missing, install or update uv, then install Python 3.14.0 and Free Claude Code:
+Install or update Claude Code, install or update uv, then install Python 3.14.0 and SEPCC Unlimited Cloud Code:
 
-macOS/Linux:
+**macOS/Linux:**
 
 ```bash
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh
+curl -fsSL "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.sh?raw=1" | sh
 ```
 
-Windows PowerShell:
+**Windows PowerShell:**
 
 ```powershell
-irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1" | iex
+irm "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.ps1?raw=1" | iex
 ```
-
-Review the installers at [scripts/install.sh](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh) and [scripts/install.ps1](https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1).
 
 ### 2. Start The Proxy
 
@@ -80,27 +105,31 @@ INFO:     Admin UI: http://127.0.0.1:8082/admin (local-only)
 
 Many terminals make these clickable. Use your configured `PORT` if it is not `8082`.
 
-### 3. Open The Admin UI And Configure NVIDIA NIM
+### 3. Open The Admin UI And Configure DeepSeek
 
 Open the **Admin UI** URL from the terminal output.
 
-Need an NVIDIA NIM API key? Use the **[NVIDIA NIM provider](#nvidia-nim-provider)** section below, then scroll back up here.
+Need a DeepSeek API key? Use the **[DeepSeek provider](#deepseek-provider)** section below, then scroll back up here.
 
 <div align="center">
-  <img src="assets/admin-page.png" alt="Local admin UI for proxy settings" width="700">
+  <img src="assets/admin-page.png" alt="SEPCC Unlimited Cloud Code admin UI" width="700">
 </div>
 
-Paste your NVIDIA NIM API key into `NVIDIA_NIM_API_KEY`, then click **Validate** and **Apply**.
+Paste your DeepSeek API key into `DEEPSEEK_API_KEY`, then click **Validate** and **Apply**.
 
-The default model is already set to `nvidia_nim/nvidia/nemotron-3-super-120b-a12b`. You can change it later from the same Admin UI.
+The default model is already set to `deepseek/deepseek-v4-pro`. You can change it later from the same Admin UI.
 
 ### 4. Run Claude Code
 
 ```bash
-fcc-claude
+fcc
 ```
 
-`fcc-claude` reads the current configured port and auth token each time it starts, sets the Claude Code environment variables (including a 190k-token `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for auto-compaction), and then launches the real `claude` command.
+`fcc` reads the current configured port and auth token each time it starts, sets Claude Code environment variables (including a 190k-token `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and package-manager auto-update opt-in), runs a throttled best-effort Claude Code update check, and then launches the real `claude` command.
+
+Terminal sessions are project-local and resumable. A plain `fcc` from a project root resumes the latest compatible session when `FCC_AUTO_RESUME_LAST_SESSION=true`. Use `fcc resume`, `fcc sessions list`, and `fcc sessions doctor` for explicit recovery and diagnostics. `fcc-claude` remains available as a compatibility launcher.
+
+---
 
 ## Choose A Provider
 
@@ -137,20 +166,29 @@ Get a Gemini API key at [Google AI Studio](https://aistudio.google.com/apikey) (
 
 In the Admin UI, paste it into `GEMINI_API_KEY`, then set `MODEL` to a Gemini model slug such as `gemini/gemini-2.5-flash` or `gemini/gemini-3.1-flash-lite`.
 
-The Gemini API exposes an OpenAI-compatible endpoint at `https://generativelanguage.googleapis.com/v1beta/openai/`. Free tier quotas are per-model; prompts may be used to improve Google's products outside the UK/CH/EEA/EU unless your account region says otherwise—see Google's terms.
+The Gemini API exposes an OpenAI-compatible endpoint at `https://generativelanguage.googleapis.com/v1beta/openai/`. Free tier quotas are per-model; prompts may be used to improve Google's products outside the UK/CH/EEA/EU unless your account region says otherwise — see Google's terms.
 
 Popular examples:
 
 - `gemini/gemini-2.5-flash`
 - `gemini/gemini-3.1-flash-lite`
 
+<a id="deepseek-provider"></a>
+
 ### 4. [DeepSeek](https://platform.deepseek.com/)
 
 Get a key at [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys).
 
-In the Admin UI, paste it into `DEEPSEEK_API_KEY`, then set `MODEL` to a DeepSeek slug such as `deepseek/deepseek-chat`.
+In the Admin UI, paste it into `DEEPSEEK_API_KEY`, then set `MODEL` to a DeepSeek slug such as `deepseek/deepseek-v4-pro`.
 
 This provider uses DeepSeek's Anthropic-compatible endpoint, not the OpenAI chat-completions endpoint.
+
+Current official DeepSeek API model IDs are:
+
+- `deepseek/deepseek-v4-pro`
+- `deepseek/deepseek-v4-flash`
+
+The legacy `deepseek/deepseek-chat` and `deepseek/deepseek-reasoner` compatibility names are scheduled for retirement on 2026-07-24.
 
 ### 5. [Mistral La Plateforme](https://console.mistral.ai/)
 
@@ -307,6 +345,8 @@ Each model tier can use a different provider by setting `MODEL_OPUS`, `MODEL_SON
 
 For example, you can route Opus to `nvidia_nim/moonshotai/kimi-k2.5`, Sonnet to `open_router/deepseek/deepseek-r1-0528:free`, Haiku to `lmstudio/unsloth/GLM-4.7-Flash-GGUF`, and keep the fallback `MODEL` on `zai/glm-5.1`.
 
+---
+
 ## Connect Claude Code
 
 ### 1. Claude Code CLI
@@ -314,10 +354,25 @@ For example, you can route Opus to `nvidia_nim/moonshotai/kimi-k2.5`, Sonnet to 
 For terminal use, prefer the installed launcher:
 
 ```bash
-fcc-claude
+fcc
 ```
 
-Keep `fcc-server` running while you work. The Admin UI manages proxy config, restarts the server when runtime settings change, and `fcc-claude` reads the current Admin UI-managed port and auth token every time it starts. It also sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to `190000` for auto-compaction.
+Keep `fcc-server` running while you work. The Admin UI manages proxy config, restarts the server when runtime settings change, and `fcc` reads the current Admin UI-managed port and auth token every time it starts. It also sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW` to `190000` for auto-compaction and resumes recent project sessions when enabled.
+
+Session commands:
+
+```bash
+fcc resume
+fcc resume <session-id-or-name>
+fcc context doctor
+fcc sessions list
+fcc sessions last
+fcc sessions doctor
+fcc sessions clean
+fcc sessions rename <session-id> "new-name"
+```
+
+`sdc` is an alias for the same terminal facade, so `sdc resume` and `sdc sessions list` are equivalent.
 
 ### 2. VS Code Extension
 
@@ -360,6 +415,8 @@ Restart the IDE after changing the file.
   <img src="assets/cc-model-picker.png" alt="Claude Code model picker showing gateway models" width="700">
 </div>
 
+---
+
 ## Optional Integrations
 
 For every integration below, change **managed proxy settings** only in the **Admin UI** at `/admin`: edit fields, click **Validate**, then **Apply**. The footer shows where the managed config is stored; this README does not walk through editing that file by hand.
@@ -386,11 +443,11 @@ The bot wrapper runs Claude Code sessions remotely, streams progress, supports r
 2. In the sidebar, choose **Messaging**.
 3. Set **Messaging Platform** to **discord** or **telegram**.
 4. For Discord, paste **Discord Bot Token** and **Allowed Discord Channels**. For Telegram, paste **Telegram Bot Token** and **Allowed Telegram User ID**.
-5. Set **Allowed Directory** to an absolute path on the machine running the proxy—the workspace root the bot may use.
+5. Set **Allowed Directory** to an absolute path on the machine running the proxy — the workspace root the bot may use.
 6. Click **Validate**, then **Apply**. Restart the server if the UI says one is required.
 
 <div align="center">
-  <img src="assets/admin-messaging.png" alt="Admin UI Messaging view with bot and voice settings" width="700">
+  <img src="assets/admin-messaging.png" alt="SEPCC Admin UI Messaging view with bot and voice settings" width="700">
 </div>
 
 <p align="center"><em>Admin UI → Messaging (platform, bots, and Voice)</em></p>
@@ -403,67 +460,71 @@ The bot wrapper runs Claude Code sessions remotely, streams progress, supports r
 
 ### 2. Voice Notes
 
-Voice notes work on Discord and Telegram after you extend your [Free Claude Code install](#1-fast-install) with the matching optional extras.
+Voice notes work on Discord and Telegram after you extend your SEPCC Unlimited Cloud Code install with the matching optional extras.
 
-macOS/Linux:
+**macOS/Linux:**
 
 ```bash
 # NVIDIA NIM transcription (Riva gRPC)
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-nim
+curl -fsSL "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-nim
 
 # Local Whisper (CPU or CUDA)
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local
+curl -fsSL "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local
 
 # Both backends
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-all
+curl -fsSL "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-all
 
 # Local Whisper with CUDA
-curl -fsSL "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local --torch-backend cu130
+curl -fsSL "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.sh?raw=1" | sh -s -- --voice-local --torch-backend cu130
 ```
 
-Windows PowerShell:
+**Windows PowerShell:**
 
 ```powershell
 # NVIDIA NIM transcription (Riva gRPC)
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceNim
+& ([scriptblock]::Create((irm "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.ps1?raw=1"))) -VoiceNim
 
 # Local Whisper (CPU or CUDA)
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal
+& ([scriptblock]::Create((irm "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal
 
 # Both backends
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceAll
+& ([scriptblock]::Create((irm "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.ps1?raw=1"))) -VoiceAll
 
 # Local Whisper with CUDA
-& ([scriptblock]::Create((irm "https://github.com/Alishahryar1/free-claude-code/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal -TorchBackend cu130
+& ([scriptblock]::Create((irm "https://github.com/sepehrbayat/SEPCC/blob/main/scripts/install.ps1?raw=1"))) -VoiceLocal -TorchBackend cu130
 ```
 
 Restart `fcc-server` after reinstalling.
 
 In the **Admin UI**, open **Messaging** and scroll to **Voice**. Turn on **Voice Notes**, choose **Whisper Device** (`cpu`, `cuda`, or `nvidia_nim`), set **Whisper Model**, and enter **Hugging Face Token** when your setup needs it. For **nvidia_nim** transcription, install the `voice` extra and set **NVIDIA NIM API Key** on the **Providers** view. The screenshot above shows the **Voice** block in the same view.
 
+---
+
 ## How It Works
 
 <div align="center">
-  <img src="assets/how-it-works.svg" alt="Free Claude Code request flow architecture" width="900">
+  <img src="assets/how-it-works.svg" alt="SEPCC Unlimited Cloud Code request flow architecture" width="900">
 </div>
 
 Diagram source: [`assets/how-it-works.mmd`](assets/how-it-works.mmd).
 
 Important pieces:
 
-- FastAPI exposes Anthropic-compatible routes such as `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/models`.
-- Model routing resolves the Claude model name to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`.
-- NIM, OpenCode Zen, and OpenCode Go use OpenAI chat streaming translated into Anthropic SSE.
-- Wafer, OpenRouter, DeepSeek, Kimi, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama use Anthropic Messages style transports where applicable (with provider-specific quirks and model-list URLs).
-- The proxy normalizes thinking blocks, tool calls, token usage metadata, and provider errors into the shape Claude Code expects.
-- Request optimizations answer trivial Claude Code probes locally to save latency and quota.
+- **FastAPI** exposes Anthropic-compatible routes such as `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/models`.
+- **Model routing** resolves the Claude model name to `MODEL_OPUS`, `MODEL_SONNET`, `MODEL_HAIKU`, or `MODEL`.
+- **NIM, OpenCode Zen, and OpenCode Go** use OpenAI chat streaming translated into Anthropic SSE.
+- **Wafer, OpenRouter, DeepSeek, Kimi, Fireworks AI, Z.ai, LM Studio, llama.cpp, and Ollama** use Anthropic Messages style transports where applicable (with provider-specific quirks and model-list URLs).
+- The proxy **normalizes thinking blocks, tool calls, token usage metadata, and provider errors** into the shape Claude Code expects.
+- **Request optimizations** answer trivial Claude Code probes locally to save latency and quota.
+
+---
 
 ## Development
 
 ### 1. Project Structure
 
 ```text
-free-claude-code/
+SEPCC/
 ├── server.py              # ASGI entry point
 ├── api/                   # FastAPI routes, service layer, routing, optimizations
 ├── core/                  # Shared Anthropic protocol helpers and SSE utilities
@@ -479,8 +540,8 @@ free-claude-code/
 Use this path if you are developing or want to run directly from a checkout:
 
 ```bash
-git clone https://github.com/Alishahryar1/free-claude-code.git
-cd free-claude-code
+git clone https://github.com/sepehrbayat/SEPCC.git
+cd SEPCC
 uv run uvicorn server:app --host 0.0.0.0 --port 8082
 ```
 
@@ -489,7 +550,6 @@ uv run uvicorn server:app --host 0.0.0.0 --port 8082
 ```bash
 uv run ruff format
 uv run ruff check
-uv run ty check
 uv run pytest
 ```
 
@@ -499,9 +559,11 @@ Run them in that order before pushing. CI enforces the same checks.
 
 `pyproject.toml` installs:
 
+- `fcc`: primary terminal Claude Code launcher with project-local session resume commands.
+- `sdc`: compatibility alias for `fcc`.
 - `fcc-server`: starts the proxy with configured host and port.
 - `fcc-init`: optional advanced scaffold for `~/.fcc/.env`; prefer the **Admin UI** for normal configuration.
-- `fcc-claude`: launches Claude Code with the configured local proxy URL, auth token, model discovery flag, and a 190k `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for auto-compaction.
+- `fcc-claude`: compatibility launcher for Claude Code with the configured local proxy URL, auth token, model discovery flag, package-manager auto-update opt-in, and a 190k `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for auto-compaction.
 - `free-claude-code`: compatibility alias for `fcc-server`.
 
 ### 5. Extending
@@ -511,16 +573,115 @@ Run them in that order before pushing. CI enforces the same checks.
 - Register provider metadata in `config.provider_catalog` and factory wiring in `providers.registry`.
 - Add messaging platforms by implementing the `MessagingPlatform` interface in `messaging/`.
 
+---
+
 ## Contributing
 
 - [`.env.example`](.env.example) lists env key names as a read-only reference for contributors; use the **Admin UI** to change managed proxy settings.
-- Report bugs and feature requests in [Issues](https://github.com/Alishahryar1/free-claude-code/issues).
+- Report bugs and feature requests in [Issues](https://github.com/sepehrbayat/SEPCC/issues).
 - Keep changes small and covered by focused tests.
 - Do not open Docker integration PRs.
-- Do not open README change PRs just open an issue for it.
+- Do not open README change PRs — just open an issue for it.
 - Run the full check sequence before opening a pull request.
-- The syntax `except X, Y` is brought back in python 3.14 final version (not in 3.14 alpha). Keep in mind before opening PRs.
+- The syntax `except X, Y` is brought back in Python 3.14 final version (not in 3.14 alpha). Keep in mind before opening PRs.
 
-## License
+---
 
-MIT License. See [LICENSE](LICENSE) for details.
+## License and Attributions
+
+### Primary License
+
+SEPCC — Unlimited Cloud Code is licensed under the **MIT License**.
+
+```
+MIT License
+
+Copyright (c) 2026 Ali Khokhar
+Copyright (c) 2026 Sepehr Bayat
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+See [LICENSE](LICENSE) for the full text.
+
+### Third-Party Dependency Licenses
+
+SEPCC Unlimited Cloud Code builds on these open-source projects. Their licenses are included here as required by each respective license:
+
+| Package | License | Usage |
+|---------|---------|-------|
+| [FastAPI](https://github.com/fastapi/fastapi) | MIT | Web framework and API routing |
+| [Uvicorn](https://github.com/encode/uvicorn) | BSD 3-Clause | ASGI server |
+| [httpx](https://github.com/encode/httpx) | BSD 3-Clause | HTTP client for provider backends |
+| [Pydantic](https://github.com/pydantic/pydantic) | MIT | Data validation and settings |
+| [Pydantic Settings](https://github.com/pydantic/pydantic-settings) | MIT | Environment-based settings management |
+| [tiktoken](https://github.com/openai/tiktoken) | MIT | Token counting for Anthropic API |
+| [OpenAI Python](https://github.com/openai/openai-python) | Apache 2.0 | OpenAI-compatible provider adapters |
+| [aiohttp](https://github.com/aio-libs/aiohttp) | Apache 2.0 | Async HTTP server for streaming |
+| [Loguru](https://github.com/Delgan/loguru) | MIT | Structured logging |
+| [python-dotenv](https://github.com/theskumar/python-dotenv) | BSD 3-Clause | Environment variable loading |
+| [markdown-it-py](https://github.com/executablebooks/markdown-it-py) | MIT | Markdown rendering |
+| [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) | LGPLv3 | Telegram bot integration |
+| [discord.py](https://github.com/Rapptz/discord.py) | MIT | Discord bot integration |
+
+#### Optional Voice Dependencies
+
+| Package | License | Usage |
+|---------|---------|-------|
+| [gRPC](https://github.com/grpc/grpc) | Apache 2.0 | Riva client transport for NVIDIA NIM voice |
+| [nvidia-riva-client](https://github.com/nvidia-riva) | NVIDIA Proprietary | NVIDIA NIM voice transcription client |
+| [PyTorch](https://github.com/pytorch/pytorch) | BSD 3-Clause | Local Whisper model inference |
+| [Transformers](https://github.com/huggingface/transformers) | Apache 2.0 | Hugging Face model pipeline |
+| [Accelerate](https://github.com/huggingface/accelerate) | Apache 2.0 | Distributed inference optimization |
+| [librosa](https://github.com/librosa/librosa) | ISC | Audio processing and analysis |
+
+#### Development Dependencies
+
+| Package | License | Usage |
+|---------|---------|-------|
+| [pytest](https://github.com/pytest-dev/pytest) | MIT | Test framework |
+| [pytest-asyncio](https://github.com/pytest-dev/pytest-asyncio) | Apache 2.0 | Async test support |
+| [pytest-cov](https://github.com/pytest-dev/pytest-cov) | MIT | Test coverage reporting |
+| [pytest-xdist](https://github.com/pytest-dev/pytest-xdist) | MIT | Parallel test execution |
+| [Ruff](https://github.com/astral-sh/ruff) | MIT | Linting and formatting |
+| [Ty](https://github.com/paulz/ty) | MIT | Static type checking |
+
+### Anthropic / Claude Code
+
+SEPCC is a proxy layer and is **not** affiliated with, endorsed by, or associated with Anthropic PBC. Claude Code is a product of Anthropic PBC. The Anthropic API, Messages API, and Claude Code client protocol are governed by Anthropic's own terms of service and commercial terms.
+
+### Upstream Attribution
+
+This project is a fork of [Free Claude Code](https://github.com/Alishahryar1/free-claude-code) by Ali Khokhar, originally created as a middleware proxy between Claude Code CLI and NVIDIA NIM. We gratefully acknowledge the original author's work in establishing this provider-agnostic proxy architecture.
+
+---
+
+## SEO Keywords
+
+**Unlimited Cloud Code**, **SEPCC**, **free Claude Code**, **Claude Code alternative**, **unlimited AI coding**, **free AI coding assistant**, **Anthropic API proxy**, **Claude Code without limits**, **AI pair programming free**, **unlimited Claude Code proxy**, **free coding AI unlimited**, **Claude Code free tier alternative**, **open source Claude Code proxy**, **multi-provider AI coding**, **SEPCC unlimited cloud coding**.
+
+---
+
+<div align="center">
+
+**SEPCC — Unlimited Cloud Code** · Free AI coding, unlimited.
+
+[GitHub](https://github.com/sepehrbayat/SEPCC) · [Issues](https://github.com/sepehrbayat/SEPCC/issues) · [Upstream](https://github.com/Alishahryar1/free-claude-code)
+
+</div>
