@@ -2,7 +2,9 @@
 REM Launch Free Claude Code proxy + Claude CLI in a project you choose.
 setlocal EnableExtensions
 
-set "FCC_REPO=C:\Users\sepehr\projects\free-claude-code-main"
+REM Resolve FCC_REPO from this script's location: ...\scripts\windows\launch-fcc-claude.cmd → repo root.
+set "FCC_REPO=%~dp0..\.."
+for %%I in ("%FCC_REPO%") do set "FCC_REPO=%%~fI"
 if defined FCC_REPO_ROOT set "FCC_REPO=%FCC_REPO_ROOT%"
 if not defined FCC_PROJECTS_ROOT set "FCC_PROJECTS_ROOT=%USERPROFILE%\projects"
 

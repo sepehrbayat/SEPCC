@@ -274,6 +274,64 @@ Install with voice extras, configure in Admin UI → Messaging → Voice. Suppor
 
 ---
 
+## Your first prompt
+
+When you start a fresh project session, what you say first sets the tone for everything that follows. A good first prompt saves you hours of corrections later. A vague one has Claude guessing at what you actually want.
+
+### The template
+
+Here's a prompt that works for pretty much any new project. Copy it, fill in your details, and drop it into Claude Code:
+
+```
+I'm starting a new project called [NAME]. Here's what I'm building:
+
+[2-3 sentences describing what the software does and who it's for.]
+
+Tech stack: [languages, frameworks, database, anything relevant.]
+
+Project structure so far:
+- [key files and what they do]
+- [any existing architecture decisions]
+
+Before writing code, can you:
+1. Read through the project files to understand what's already here
+2. Confirm you understand the goal — ask me questions if anything is unclear
+3. Suggest a plan for the first piece of work, in the order it should be built
+
+I'd like to work incrementally. Let's start with [concrete first task] and build from there.
+```
+
+### Why this works
+
+Most people open Claude Code and say "build me a todo app." That gets you something generic. This prompt does three things that matter:
+
+- **Context first.** You're telling Claude to read and understand before it writes. SEPCC will inject your handoff and project rules via the SessionStart hook anyway, but being explicit about reading files means Claude actually looks at your codebase instead of hallucinating a structure.
+- **Bounded scope.** "Let's start with this one thing" prevents Claude from writing 800 lines across 12 files before you've agreed on the approach. You can review, course-correct, and move on.
+- **Questions allowed.** Telling Claude it can ask clarifying questions means it won't silently guess when something is ambiguous. Fewer wrong assumptions, fewer rewrites.
+
+### A real example
+
+Say you're building a CLI tool that converts CSV files to JSON. Your repo already has a `pyproject.toml` and an empty `src/` directory. Here's what you'd actually type:
+
+```
+I'm building a CLI tool called csv2json that reads CSV files and outputs JSON.
+It should handle large files streaming, support custom delimiters, and have
+pretty-print and compact output modes. Tech stack: Python, Click for CLI,
+pytest for tests. Project structure: pyproject.toml, empty src/csv2json/.
+
+Before writing code, can you:
+1. Read pyproject.toml to understand the project setup
+2. Confirm you understand the requirements
+3. Suggest a plan starting with the CLI entry point and a basic streaming converter
+
+Let's start with the Click CLI skeleton that accepts --delimiter, --pretty,
+and an input file argument. We'll wire up the converter after.
+```
+
+The more specific you are in that first message, the better the whole session goes. For **unlimited Claude Code** sessions that span days, this upfront clarity compounds — every decision you nail early saves you from digging through old handoff entries later.
+
+---
+
 ## How it works
 
 Claude Code speaks Anthropic's Messages API. SEPCC intercepts those requests and routes them to whichever provider you configured. Responses get normalized back into the shape Claude Code expects — thinking blocks, tool calls, streaming SSE, everything.
@@ -295,6 +353,84 @@ Hooks maintain state across sessions:
 - `PreCompact` — preserves critical context before compaction
 - `UserPromptSubmit` — handles handoff recall
 - `Stop` — final persistence
+
+---
+
+## V2Ray system proxy (port 10808)
+
+If you're behind internet restrictions or a firewall — common in some regions — SEPCC has you covered. It auto-detects local proxy software that's already running on your machine and routes provider API calls through it.
+
+### How it works
+
+SEPCC reads your Windows proxy settings from the registry (`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings`). When it finds a proxy configured on a known local SOCKS port — like V2Ray on **10808** — it normalizes the address to `socks5://127.0.0.1:10808` and uses it for outbound API calls.
+
+The ports SEPCC recognizes:
+
+| Port | Typical software |
+|------|-----------------|
+| 10808 | V2Ray / V2RayN (default SOCKS5) |
+| 10809 | V2Ray HTTP proxy |
+| 1080 | Generic SOCKS5 proxy |
+| 1086 | Shadowsocks / alternative setups |
+| 7890 | Clash / Clash Verge |
+| 7891 | Clash mixed port |
+
+### What "system-wide" means
+
+This isn't a SEPCC-specific proxy setting. When you enable V2Ray's system proxy mode, Windows updates the registry, and SEPCC picks it up automatically through `AUTO_DETECT_SYSTEM_PROXY` (enabled by default). The result: all 17 providers route through your V2Ray tunnel without you touching a single SEPCC config field. Your terminal, your CLI tools, and SEPCC all use the same proxy — no per-app setup.
+
+You can also set per-provider proxies in the Admin UI (each provider has a `_PROXY` env var like `DEEPSEEK_PROXY`, `GEMINI_PROXY`, etc.) if you want different routing for different backends. Per-provider proxies take priority over system auto-detection.
+
+To disable auto-detection, flip `AUTO_DETECT_SYSTEM_PROXY` to `false` in the Admin UI under Providers → Advanced.
+
+---
+
+## Windows Desktop Shortcut
+
+On Windows, SEPCC comes with a desktop shortcut launcher that starts the proxy server and drops you directly into a project — no terminal commands needed.
+
+### What happens when you double-click it
+
+1. The `launch-fcc-claude.cmd` script starts the SEPCC proxy server in a separate window.
+2. It waits for the server to become healthy (up to 30 seconds).
+3. `pick-project.ps1` opens and shows you a numbered list of all folders inside your projects directory.
+4. You pick a project — by number, by browsing with a folder dialog, or by typing a path manually.
+5. It launches `fcc-claude` pointed at that project folder.
+
+The shortcut works out of the box. You can pin it to your taskbar or start menu.
+
+### The projects path
+
+The project picker looks for folders inside `%USERPROFILE%\projects` by default — that's `C:\Users\<your-name>\projects`. You can override it by setting the `FCC_PROJECTS_ROOT` environment variable to any path you want.
+
+**If the folder doesn't exist yet, the picker creates it for you automatically.** No error, no manual `mkdir` step. The first time you run the shortcut, it creates the folder silently and shows an empty list — you can still browse or type a path manually. After you've added projects to the folder, they show up in the numbered list.
+
+### Customizing the shortcut
+
+The launcher resolves the SEPCC repo location automatically from the script's own location — no hardcoded paths. If you move the repo, the shortcut follows. If you need to override it (for example, if you want the shortcut to live somewhere else but still point to the right install), set `FCC_REPO_ROOT`:
+
+```cmd
+set "FCC_REPO_ROOT=D:\tools\SEPCC"
+```
+
+### The full path chain, explained
+
+When you click the shortcut:
+
+```
+Desktop shortcut (launch-fcc-claude.cmd)
+  → Script resolves repo root from its own location (%~dp0..\..)
+  → Starts proxy server on port 8082
+  → Runs pick-project.ps1:
+      → Looks in %FCC_PROJECTS_ROOT% (default: %USERPROFILE%\projects)
+      → Auto-creates the folder if it doesn't exist
+      → Lists subdirectories as numbered choices
+      → Or: B to browse, 0 to type a path
+  → Launches fcc-claude <selected-project-path>
+  → fcc-claude sets up environment, runs claude --resume (or fresh)
+```
+
+This is meant to be the frictionless Windows experience. No terminal, no manual env var setup, no "where's my project root." Just double-click, pick a project, start coding.
 
 ---
 

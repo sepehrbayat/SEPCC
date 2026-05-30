@@ -22,8 +22,13 @@ function Write-SelectedPath {
 }
 
 if (-not (Test-ProjectDirectory $ProjectsRoot)) {
-    Write-Error "Projects folder not found: $ProjectsRoot. Set FCC_PROJECTS_ROOT to your projects path."
-    exit 1
+    try {
+        New-Item -ItemType Directory -Path $ProjectsRoot -Force | Out-Null
+        Write-Host "Created projects folder: $ProjectsRoot"
+    } catch {
+        Write-Error "Could not create projects folder: $ProjectsRoot ($($_.Exception.Message))"
+        exit 1
+    }
 }
 
 $projects = @(Get-ChildItem -LiteralPath $ProjectsRoot -Directory |
