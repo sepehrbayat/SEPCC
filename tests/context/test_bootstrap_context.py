@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,12 @@ def run_hook(script_name: str, payload: dict[str, object]) -> dict[str, Any]:
     output = json.loads(result.stdout)
     assert isinstance(output, dict)
     return output
+
+
+def hook_command(settings: dict[str, Any], event_name: str) -> str:
+    command = settings["hooks"][event_name][0]["hooks"][0]["command"]
+    assert isinstance(command, str)
+    return command
 
 
 def write_transcript(path: Path, user_text: str, assistant_text: str) -> None:
@@ -108,9 +115,71 @@ def test_bootstrap_merges_existing_claude_settings(tmp_path: Path) -> None:
     assert data["permissions"]["allow"] == ["Bash(git status:*)"]
     assert data["env"]["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
     assert "SessionStart" in data["hooks"]
-    assert data["statusLine"]["command"].endswith(
-        "scripts/statusline/fcc_statusline.py"
+    assert "scripts/statusline/fcc_statusline.py" in data["statusLine"]["command"]
+    assert "Path.cwd().resolve()" in data["statusLine"]["command"]
+
+
+def test_bootstrap_repairs_legacy_relative_hook_commands(tmp_path: Path) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "UserPromptSubmit": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python scripts/hooks/user_prompt_submit.py",
+                                    "timeout": 10,
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "statusLine": {
+                    "type": "command",
+                    "command": "uv run python scripts/statusline/fcc_statusline.py",
+                },
+            }
+        ),
+        encoding="utf-8",
     )
+
+    bootstrap_context(tmp_path)
+
+    data = json.loads(settings.read_text("utf-8"))
+    command = hook_command(data, "UserPromptSubmit")
+    assert "python scripts/hooks/user_prompt_submit.py" not in command
+    assert "scripts/hooks/user_prompt_submit.py" in command
+    assert "Path.cwd().resolve()" in command
+    assert "Path.cwd().resolve()" in data["statusLine"]["command"]
+
+
+def test_bootstrapped_hook_command_runs_from_nested_cwd(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    nested = tmp_path / "temp"
+    nested.mkdir()
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    command = hook_command(settings, "SessionStart")
+    env = {**os.environ, "AUTO_PROMPT_ENHANCER": "false"}
+
+    result = subprocess.run(
+        command,
+        input=json.dumps({"cwd": str(nested)}),
+        text=True,
+        capture_output=True,
+        shell=True,
+        cwd=nested,
+        env=env,
+        check=True,
+    )
+
+    output = json.loads(result.stdout)
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "FCC Agent Runtime" in context
+    assert str(nested / "scripts" / "hooks") not in result.stderr
 
 
 def test_bootstrap_merges_token_savior_into_existing_mcp(tmp_path: Path) -> None:

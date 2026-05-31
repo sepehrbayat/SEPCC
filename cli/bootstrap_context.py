@@ -77,6 +77,8 @@ HOOK_OWNER_MARKERS = {
         "scripts\\hooks\\subagent_stop.py",
         "scripts/hooks/precompact.py",
         "scripts\\hooks\\precompact.py",
+        "scripts/statusline/fcc_statusline.py",
+        "scripts\\statusline\\fcc_statusline.py",
         "fcc handoff",
     ),
     "MemSearch": ("memsearch", ".memsearch"),
@@ -286,7 +288,7 @@ def ensure_claude_context_mcp(path: Path, *, force: bool) -> None:
 def ensure_claude_settings(path: Path, *, force: bool) -> None:
     """Merge FCC hook/env settings without dropping existing Claude settings."""
     existing = _load_json(path) if path.is_file() else {}
-    template = _template_claude_settings()
+    template = _portable_claude_settings()
 
     env = existing.setdefault("env", {})
     if not isinstance(env, dict):
@@ -309,12 +311,20 @@ def ensure_claude_settings(path: Path, *, force: bool) -> None:
                 raise BootstrapError(f"{path} hooks.{event} must be a list.")
             if "FCC context" not in _owners_for_hook_entries(current_entries):
                 current_entries.extend(template_entries)
-            elif force:
+            else:
                 _replace_fcc_hooks(current_entries, template_entries)
 
     for scalar_key in ("statusLine",):
         if scalar_key in template and (force or scalar_key not in existing):
             existing[scalar_key] = template[scalar_key]
+        elif scalar_key == "statusLine":
+            status_line = existing.get(scalar_key)
+            if (
+                isinstance(status_line, dict)
+                and _owner_for_command(str(status_line.get("command", "")))
+                == "FCC context"
+            ):
+                existing[scalar_key] = template[scalar_key]
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -544,6 +554,55 @@ def _owner_for_command(command: str) -> str | None:
         if any(marker in lowered for marker in markers):
             return owner
     return None
+
+
+def _portable_claude_settings() -> dict[str, Any]:
+    """Return template settings with hook commands safe from nested CWDs."""
+    settings = _template_claude_settings()
+    _rewrite_fcc_script_commands(settings)
+    return settings
+
+
+def _rewrite_fcc_script_commands(node: Any) -> None:
+    if isinstance(node, list):
+        for item in node:
+            _rewrite_fcc_script_commands(item)
+        return
+    if not isinstance(node, dict):
+        return
+    command = node.get("command")
+    if isinstance(command, str):
+        replacement = _portable_script_command(command)
+        if replacement is not None:
+            node["command"] = replacement
+    for value in node.values():
+        _rewrite_fcc_script_commands(value)
+
+
+def _portable_script_command(command: str) -> str | None:
+    normalized = command.replace("\\", "/").lower()
+    for name in HOOK_SCRIPT_NAMES:
+        rel_path = f"scripts/hooks/{name}"
+        if rel_path in normalized:
+            return _python_parent_search_command(rel_path)
+    for name in STATUSLINE_SCRIPT_NAMES:
+        rel_path = f"scripts/statusline/{name}"
+        if rel_path in normalized:
+            return _python_parent_search_command(rel_path)
+    return None
+
+
+def _python_parent_search_command(rel_path: str) -> str:
+    code = (
+        "from pathlib import Path; import runpy, sys; "
+        "p=Path.cwd().resolve(); "
+        f"rel=Path({rel_path!r}); "
+        "root=next((x for x in [p,*p.parents] if (x/rel).is_file()), None); "
+        "assert root is not None, f'FCC script not found: {rel}'; "
+        "sys.path.insert(0, str((root/rel).parent)); "
+        "runpy.run_path(str(root/rel), run_name='__main__')"
+    )
+    return f'uv run python -c "{code}"'
 
 
 def _load_json(path: Path) -> dict[str, Any]:

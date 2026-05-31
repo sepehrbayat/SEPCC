@@ -43,7 +43,25 @@ def read_hook_input() -> dict[str, Any]:
 
 def project_root(data: dict[str, Any]) -> Path:
     raw = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd()
-    return Path(str(raw)).expanduser().resolve()
+    start = Path(str(raw)).expanduser().resolve()
+    if start.is_file():
+        start = start.parent
+    return nearest_project_root(start)
+
+
+def nearest_project_root(start: Path) -> Path:
+    """Return the nearest parent carrying FCC/Claude project scaffolding."""
+    home = Path.home().resolve()
+    for candidate in (start, *start.parents):
+        if candidate == home and candidate != start:
+            break
+        if (
+            (candidate / ".fcc" / "context").is_dir()
+            or (candidate / ".fcc" / "plugin-policy.yml").is_file()
+            or (candidate / "scripts" / "hooks" / "_shared.py").is_file()
+        ):
+            return candidate
+    return start
 
 
 def emit_hook_json(
