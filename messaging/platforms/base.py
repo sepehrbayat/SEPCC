@@ -31,6 +31,36 @@ class SessionManagerInterface(Protocol):
     Implementations: CLISessionManager
     """
 
+    @property
+    def workspace(self) -> str:
+        """Workspace path used by managed CLI sessions."""
+        ...
+
+    @property
+    def api_url(self) -> str:
+        """Proxy API URL used by managed CLI sessions."""
+        ...
+
+    @property
+    def auth_token(self) -> str:
+        """Proxy auth token used by managed CLI sessions."""
+        ...
+
+    @property
+    def prompt_enhancer_timeout(self) -> float:
+        """Timeout for explicit prompt enhancement."""
+        ...
+
+    @property
+    def prompt_enhancer_model(self) -> str:
+        """Model used for explicit prompt enhancement."""
+        ...
+
+    @property
+    def prompt_enhancer_max_output_chars(self) -> int:
+        """Maximum enhanced prompt length."""
+        ...
+
     async def get_or_create_session(
         self, session_id: str | None = None
     ) -> tuple[CLISession, str, bool]:

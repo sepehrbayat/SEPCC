@@ -15,6 +15,7 @@ STATUS_MESSAGE_PREFIXES = (
     "📋",
     "📊",
     "🔄",
+    "✨",
 )
 
 # Event types that update the transcript (frozenset for O(1) membership)
@@ -64,4 +65,12 @@ def get_status_for_event(
         if parsed.get("name") == "Task":
             return format_status_fn("🤖", "Subagent working...")
         return format_status_fn("⏳", "Executing tools...")
+    if ptype == "prompt_enhancement":
+        enhanced_prompt = str(parsed.get("enhanced_prompt", "")).strip()
+        suffix = (
+            enhanced_prompt[:277] + "..."
+            if len(enhanced_prompt) > 280
+            else enhanced_prompt
+        )
+        return format_status_fn("✨", "Prompt enhanced", suffix or None)
     return None

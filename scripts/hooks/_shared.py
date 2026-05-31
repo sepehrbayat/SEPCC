@@ -10,9 +10,14 @@ import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 MAX_CONTEXT_CHARS = 3600
+MAX_ENHANCED_PROMPT_CONTEXT_CHARS = 2400
+MAX_SYSTEM_MESSAGE_CHARS = 1400
+MAX_VISIBLE_ENHANCED_PROMPT_CHARS = 1000
+DEFAULT_PROMPT_ENHANCER_MODEL = "claude-haiku-4-5-20251001"
 CONTEXT_DIR = Path(".fcc") / "context"
 FACTS_FILE = CONTEXT_DIR / "facts.md"
 DECISIONS_FILE = CONTEXT_DIR / "decisions.md"
@@ -54,7 +59,7 @@ def emit_hook_json(
             "additionalContext": additional_context[:MAX_CONTEXT_CHARS],
         }
     if system_message:
-        output["systemMessage"] = system_message[:240]
+        output["systemMessage"] = system_message[:MAX_SYSTEM_MESSAGE_CHARS]
     print(json.dumps(output, ensure_ascii=True, separators=(",", ":")))
 
 
@@ -78,13 +83,27 @@ def read_text(path: Path) -> str:
 def compact_lines(text: str, *, max_lines: int = 14, max_chars: int = 1800) -> str:
     out: list[str] = []
     used = 0
-    in_fence = False
-    for raw_line in text.splitlines():
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        raw_line = lines[index]
         line = raw_line.rstrip()
         if line.strip().startswith("```"):
-            in_fence = not in_fence
+            closing_index = next(
+                (
+                    candidate
+                    for candidate in range(index + 1, len(lines))
+                    if lines[candidate].strip().startswith("```")
+                ),
+                None,
+            )
+            if closing_index is None:
+                index += 1
+                continue
+            index = closing_index + 1
             continue
-        if in_fence or not line.strip():
+        if not line.strip():
+            index += 1
             continue
         next_len = len(line) + 1
         if used + next_len > max_chars:
@@ -93,6 +112,7 @@ def compact_lines(text: str, *, max_lines: int = 14, max_chars: int = 1800) -> s
         used += next_len
         if len(out) >= max_lines:
             break
+        index += 1
     return "\n".join(out)
 
 
@@ -133,6 +153,158 @@ def prompt_routing_hint(prompt: str) -> str:
     if command_hint := command_protocol_hint(prompt):
         parts.append(command_hint)
     return " ".join(parts)
+
+
+def prompt_enhancement_hint(prompt: str, root: Path) -> str:
+    """Return an enhanced-prompt context hint for interactive Claude Code turns."""
+    additional_context, _system_message = prompt_enhancement_outputs(prompt, root)
+    return additional_context
+
+
+def prompt_enhancement_outputs(prompt: str, root: Path) -> tuple[str, str]:
+    """Return agent context plus a visible status message for auto-enhancement."""
+    if not _env_bool("AUTO_PROMPT_ENHANCER", default=True):
+        return "", ""
+    stripped = prompt.lstrip()
+    if not stripped or stripped.startswith("/"):
+        return "", ""
+    api_url = _messages_api_url()
+    if not api_url:
+        return (
+            "",
+            "FCC auto-enhancer is enabled but no proxy URL is configured. "
+            "Launch with fcc-claude or set ANTHROPIC_BASE_URL.",
+        )
+
+    result = _enhance_prompt_with_core(
+        prompt,
+        root,
+        api_url=api_url,
+        api_key=os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip(),
+        model=_env_text("PROMPT_ENHANCER_MODEL", default=DEFAULT_PROMPT_ENHANCER_MODEL),
+        timeout=_env_float("PROMPT_ENHANCER_TIMEOUT", default=12.0),
+        max_output_chars=_env_int("PROMPT_ENHANCER_MAX_OUTPUT_CHARS", default=2000),
+    )
+    if not result.changed:
+        return "", _enhancement_status_message(result)
+
+    enhanced = result.enhanced_prompt[:MAX_ENHANCED_PROMPT_CONTEXT_CHARS]
+    additional_context = (
+        "FCC enhanced prompt: Treat this as clarification of the user's intent; "
+        "do not mention the enhancement wrapper.\n" + enhanced
+    )
+    return additional_context, _enhancement_status_message(result)
+
+
+def _messages_api_url() -> str:
+    base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+    if not base:
+        api_url = os.environ.get("ANTHROPIC_API_URL", "").strip()
+        if api_url:
+            return (
+                api_url.rstrip("/") + "/messages"
+                if api_url.endswith("/v1")
+                else api_url
+            )
+        port = os.environ.get("FCC_PORT", "").strip()
+        if port.isdigit():
+            return f"http://127.0.0.1:{port}/v1/messages"
+        return ""
+    base = base.rstrip("/")
+    if base.endswith("/v1"):
+        return base + "/messages"
+    return base + "/v1/messages"
+
+
+def _enhance_prompt_with_core(
+    prompt: str,
+    root: Path,
+    *,
+    api_url: str,
+    api_key: str,
+    model: str,
+    timeout: float,
+    max_output_chars: int,
+) -> Any:
+    package_root = os.environ.get("FCC_PACKAGE_ROOT", "").strip()
+    if package_root and package_root not in sys.path:
+        sys.path.insert(0, package_root)
+    try:
+        from core.prompt_enhancer import enhance_prompt_sync
+    except Exception as exc:
+        return SimpleNamespace(
+            original_prompt=prompt,
+            enhanced_prompt=prompt,
+            status="unavailable",
+            reason=type(exc).__name__,
+        )
+
+    return enhance_prompt_sync(
+        prompt,
+        str(root),
+        api_url=api_url,
+        api_key=api_key,
+        model=model,
+        timeout=timeout,
+        max_output_chars=max_output_chars,
+    )
+
+
+def _enhancement_status_message(result: Any) -> str:
+    status = str(getattr(result, "status", ""))
+    if status == "enhanced":
+        enhanced = str(getattr(result, "enhanced_prompt", ""))[
+            :MAX_VISIBLE_ENHANCED_PROMPT_CHARS
+        ]
+        return "FCC auto-enhanced prompt:\n" + enhanced
+    if status == "unchanged":
+        return "FCC auto-enhancer checked this prompt; no rewrite needed."
+    if status in {"timeout", "error", "empty", "context_error"}:
+        return f"FCC auto-enhancer could not refine this prompt ({status}); using original."
+    if status == "unavailable":
+        reason = str(getattr(result, "reason", "import_error"))
+        return (
+            "FCC auto-enhancer is enabled but the core enhancer is unavailable "
+            f"({reason}); launch with fcc-claude."
+        )
+    return ""
+
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _env_float(name: str, *, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _env_text(name: str, *, default: str) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip()
+    return value or default
+
+
+def _env_int(name: str, *, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _fallback_runtime_contract() -> str:
@@ -433,28 +605,28 @@ def regenerate_handoff(root: Path, transcript_path: Path | str | None) -> None:
         max_items=5,
     )
     decisions = "\n".join(decision_lines) or "- No new decisions detected."
-    handoff_path.write_text(
-        "\n".join(
-            [
-                "# FCC Handoff",
-                "",
-                "## Must Not Forget",
-                must_lines,
-                "",
-                "## Current State",
-                current_state,
-                "",
-                "## Decisions",
-                decisions,
-                "",
-                "## Next Steps",
-                "- Run /verify-context before major edits.",
-                "- Store raw logs in the SQLite sidecar; do not replay them into chat.",
-                "",
-            ]
-        ),
-        encoding="utf-8",
+    content = "\n".join(
+        [
+            "# FCC Handoff",
+            "",
+            "## Must Not Forget",
+            must_lines,
+            "",
+            "## Current State",
+            current_state,
+            "",
+            "## Decisions",
+            decisions,
+            "",
+            "## Next Steps",
+            "- Run /verify-context before major edits.",
+            "- Store raw logs in the SQLite sidecar; do not replay them into chat.",
+            "",
+        ]
     )
+    tmp_path = handoff_path.with_suffix(".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(handoff_path)
     if decision_lines:
         append_new_decisions(decisions_path, decision_lines)
 

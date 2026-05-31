@@ -15,6 +15,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import uvicorn
+from loguru import logger
 
 from api.admin_urls import local_admin_url, local_proxy_root_url
 from api.app import GracefulLifespanApp, create_app
@@ -191,6 +192,13 @@ def _claude_child_env(
     env.pop("ANTHROPIC_API_KEY", None)
     env["ANTHROPIC_BASE_URL"] = local_proxy_root_url(settings)
     apply_claude_code_runtime_env(env)
+    env["AUTO_PROMPT_ENHANCER"] = "true" if settings.auto_prompt_enhancer else "false"
+    env["PROMPT_ENHANCER_MODEL"] = settings.prompt_enhancer_model
+    env["PROMPT_ENHANCER_TIMEOUT"] = str(settings.prompt_enhancer_timeout)
+    env["PROMPT_ENHANCER_MAX_OUTPUT_CHARS"] = str(
+        settings.prompt_enhancer_max_output_chars
+    )
+    env["FCC_PACKAGE_ROOT"] = str(Path(__file__).resolve().parents[1])
     if token := settings.anthropic_auth_token.strip():
         env["ANTHROPIC_AUTH_TOKEN"] = token
     return env
@@ -360,17 +368,22 @@ def launch_claude(
         raise
     finally:
         heartbeat_stop.set()
-        if process is not None and process.pid:
-            unregister_pid(process.pid)
-        _finish_registered_terminal_session(
-            registry,
-            session_record.session_id,
-            project_root=project_root,
-            work_dir=work_dir,
-            started_at=session_record.started_at,
-            native_session_id=native_resume_id,
-            return_code=return_code,
-        )
+        try:
+            if process is not None and process.pid:
+                unregister_pid(process.pid)
+            _finish_registered_terminal_session(
+                registry,
+                session_record.session_id,
+                project_root=project_root,
+                work_dir=work_dir,
+                started_at=session_record.started_at,
+                native_session_id=native_resume_id,
+                return_code=return_code,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to finalize terminal session {}", session_record.session_id
+            )
 
     raise SystemExit(return_code)
 
@@ -410,7 +423,10 @@ def _start_session_heartbeat(
 ) -> None:
     def heartbeat() -> None:
         while not stop_event.wait(HEARTBEAT_INTERVAL_SECONDS):
-            registry.heartbeat(session_id)
+            try:
+                registry.heartbeat(session_id)
+            except Exception:
+                logger.exception("Heartbeat failed for session {}", session_id)
 
     threading.Thread(
         target=heartbeat,

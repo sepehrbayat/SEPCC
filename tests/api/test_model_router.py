@@ -146,6 +146,24 @@ def test_model_router_routes_gateway_encoded_provider_model_directly(settings):
     )
 
 
+def test_model_router_gateway_model_uses_configured_claude_class_for_thinking(
+    settings,
+):
+    settings.model_opus = "nvidia_nim/deepseek-ai/deepseek-v4-pro"
+    settings.enable_model_thinking = False
+    settings.enable_opus_thinking = True
+
+    routed = ModelRouter(settings).resolve_messages_request(
+        MessagesRequest(
+            model="anthropic/nvidia_nim/deepseek-ai/deepseek-v4-pro",
+            max_tokens=100,
+            messages=[Message(role="user", content="hello")],
+        )
+    )
+
+    assert routed.resolved.thinking_enabled is True
+
+
 def test_model_router_routes_no_thinking_gateway_model_directly(settings):
     settings.enable_model_thinking = True
 

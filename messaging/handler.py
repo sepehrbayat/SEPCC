@@ -10,7 +10,7 @@ import asyncio
 
 from loguru import logger
 
-from core.anthropic import format_user_error_preview, get_user_facing_error_message
+from core.anthropic import format_user_error_preview
 from core.trace import trace_event
 
 from .cli_event_constants import STATUS_MESSAGE_PREFIXES
@@ -143,9 +143,6 @@ class ClaudeMessageHandler:
                 ),
             )
 
-        if await dispatch_command(self, incoming, cmd_base):
-            return
-
         # /enhance command: enhance the prompt inline, then continue normal processing
         text = incoming.text or ""
         if text.startswith("/enhance ") or text == "/enhance":
@@ -161,24 +158,23 @@ class ClaudeMessageHandler:
                 from core.prompt_enhancer import enhance_prompt
 
                 cli = self.cli_manager
-                workspace = getattr(cli, "workspace", "")
-                api_url = (
-                    getattr(cli, "api_url", "http://127.0.0.1:8080/v1").removesuffix(
-                        "/v1"
-                    )
-                    + "/v1/messages"
-                )
-                api_key = getattr(cli, "auth_token", "").strip()
+                api_url = cli.api_url.removesuffix("/v1") + "/v1/messages"
                 enhanced = await enhance_prompt(
                     stripped,
-                    workspace,
+                    cli.workspace,
                     api_url=api_url,
-                    api_key=api_key,
-                    timeout=getattr(cli, "_prompt_enhancer_timeout", 12.0),
+                    api_key=cli.auth_token.strip(),
+                    model=cli.prompt_enhancer_model,
+                    timeout=cli.prompt_enhancer_timeout,
+                    max_output_chars=cli.prompt_enhancer_max_output_chars,
                 )
                 incoming.text = enhanced
             except Exception:
                 incoming.text = stripped
+
+        cmd_base = parse_command_base(incoming.text)
+        if await dispatch_command(self, incoming, cmd_base):
+            return
 
         # Filter out status messages (our own messages)
         text = incoming.text or ""
@@ -226,12 +222,16 @@ class ClaudeMessageHandler:
                 fire_and_forget=False,
                 message_thread_id=incoming.message_thread_id,
             )
+        if status_msg_id is None:
+            logger.error("Failed to send status message for node {}", node_id)
+            return
+
         self.record_outgoing_message(
             incoming.platform, incoming.chat_id, status_msg_id, "status"
         )
 
         # Create or extend tree
-        if parent_node_id and tree and status_msg_id:
+        if parent_node_id and tree:
             # Reply to existing node - add as child
             tree, _node = await self.tree_queue.add_to_tree(
                 parent_node_id=parent_node_id,
@@ -243,7 +243,7 @@ class ClaudeMessageHandler:
             self.tree_queue.register_node(status_msg_id, tree.root_id)
             self.session_store.register_node(status_msg_id, tree.root_id)
             self.session_store.register_node(node_id, tree.root_id)
-        elif status_msg_id:
+        else:
             # New conversation - create new tree
             tree = await self.tree_queue.create_tree(
                 node_id=node_id,
@@ -267,6 +267,9 @@ class ClaudeMessageHandler:
 
         if was_queued and status_msg_id:
             queue_size = self.tree_queue.get_queue_size(node_id)
+            display_position = (
+                queue_size if isinstance(queue_size, int) and queue_size > 0 else 1
+            )
             trace_event(
                 stage="routing",
                 event="turn.queued",
@@ -274,13 +277,13 @@ class ClaudeMessageHandler:
                 chat_id=incoming.chat_id,
                 platform_message_id=node_id,
                 status_message_id=status_msg_id,
-                queue_size=queue_size,
+                queue_size=display_position,
             )
             await self.platform.queue_edit_message(
                 incoming.chat_id,
                 status_msg_id,
                 self.format_status(
-                    "📋", "Queued", f"(position {queue_size}) - waiting..."
+                    "📋", "Queued", f"(position {display_position}) - waiting..."
                 ),
                 parse_mode=self._parse_mode(),
             )
@@ -320,13 +323,17 @@ class ClaudeMessageHandler:
 
     async def mark_node_processing(self, tree: MessageTree, node_id: str) -> None:
         """Update the dequeued node's status to processing immediately."""
-        node = tree.get_node(node_id)
-        if not node or node.state == MessageState.ERROR:
-            return
+        async with tree.with_lock():
+            node = tree.get_node(node_id)
+            if not node or node.state == MessageState.ERROR:
+                return
+            chat_id = node.incoming.chat_id
+            status_message_id = node.status_message_id
+
         self.platform.fire_and_forget(
             self.platform.queue_edit_message(
-                node.incoming.chat_id,
-                node.status_message_id,
+                chat_id,
+                status_message_id,
                 self.format_status("🔄", "Processing..."),
                 parse_mode=self._parse_mode(),
             )
@@ -407,66 +414,44 @@ class ClaudeMessageHandler:
             await editor.update(status, force=force)
 
         try:
-            try:
-                (
-                    cli_session,
-                    session_or_temp_id,
-                    is_new,
-                ) = await self.cli_manager.get_or_create_session(
-                    session_id=parent_session_id
-                )
-                if is_new:
-                    temp_session_id = session_or_temp_id
-                else:
-                    captured_session_id = session_or_temp_id
+            (
+                cli_session,
+                session_or_temp_id,
+                is_new,
+            ) = await self.cli_manager.get_or_create_session(
+                session_id=parent_session_id
+            )
+            if is_new:
+                temp_session_id = session_or_temp_id
+            else:
+                captured_session_id = session_or_temp_id
 
-                sess_evt = (
-                    "claude_cli.session.pending_created"
-                    if is_new
-                    else "claude_cli.session.reused"
-                )
-                trace_event(
-                    stage="claude_cli",
-                    event=sess_evt,
-                    source=platform_nm,
-                    chat_id=chat_id,
-                    node_id=node_id,
-                    status_message_id=status_msg_id,
-                    session_handle=str(session_or_temp_id),
-                    parent_resume_session_id=parent_session_id,
-                    fork_requested=bool(parent_session_id),
-                )
-                trace_event(
-                    stage="claude_cli",
-                    event="claude_cli.request.sent",
-                    source=platform_nm,
-                    chat_id=chat_id,
-                    node_id=node_id,
-                    prompt=incoming.text,
-                    fork_session_arg=bool(parent_session_id),
-                    resume_session_arg=parent_session_id,
-                )
-            except RuntimeError as e:
-                error_message = get_user_facing_error_message(e)
-                transcript.apply({"type": "error", "message": error_message})
-                await update_ui(
-                    self.format_status("⏳", "Session limit reached"),
-                    force=True,
-                )
-                if tree:
-                    await tree.update_state(
-                        node_id,
-                        MessageState.ERROR,
-                        error_message=error_message,
-                    )
-                trace_event(
-                    stage="claude_cli",
-                    event="claude_cli.session.limit_reached",
-                    source=platform_nm,
-                    chat_id=chat_id,
-                    node_id=node_id,
-                )
-                return
+            sess_evt = (
+                "claude_cli.session.pending_created"
+                if is_new
+                else "claude_cli.session.reused"
+            )
+            trace_event(
+                stage="claude_cli",
+                event=sess_evt,
+                source=platform_nm,
+                chat_id=chat_id,
+                node_id=node_id,
+                status_message_id=status_msg_id,
+                session_handle=str(session_or_temp_id),
+                parent_resume_session_id=parent_session_id,
+                fork_requested=bool(parent_session_id),
+            )
+            trace_event(
+                stage="claude_cli",
+                event="claude_cli.request.sent",
+                source=platform_nm,
+                chat_id=chat_id,
+                node_id=node_id,
+                prompt=incoming.text,
+                fork_session_arg=bool(parent_session_id),
+                resume_session_arg=parent_session_id,
+            )
 
             async for event_data in cli_session.start_task(
                 incoming.text,
@@ -600,7 +585,7 @@ class ClaudeMessageHandler:
         affected = await self.tree_queue.mark_node_error(
             node_id, error_msg, propagate_to_children=True
         )
-        # Update status messages for all affected children (skip first = current node)
+        # mark_node_error returns the current node first, then pending children.
         for child in affected[1:]:
             self.platform.fire_and_forget(
                 self.platform.queue_edit_message(

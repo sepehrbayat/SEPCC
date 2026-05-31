@@ -19,6 +19,10 @@ def _launcher_settings(
         host="0.0.0.0",
         port=port,
         anthropic_auth_token=token,
+        auto_prompt_enhancer=True,
+        prompt_enhancer_model="claude-haiku-4-5-20251001",
+        prompt_enhancer_timeout=12.0,
+        prompt_enhancer_max_output_chars=2000,
     )
 
 
@@ -47,6 +51,10 @@ def test_init_creates_env_file(tmp_path: Path) -> None:
 
     assert env_file.exists()
     assert env_file.stat().st_size > 0
+    env_text = env_file.read_text(encoding="utf-8")
+    assert "AUTO_PROMPT_ENHANCER=true" in env_text
+    assert "PROMPT_ENHANCER_MODEL=claude-haiku-4-5-20251001" in env_text
+    assert "PROMPT_ENHANCER_TIMEOUT=12" in env_text
     assert str(env_file) in output
 
 
@@ -314,6 +322,11 @@ def test_claude_child_env_targets_current_proxy_config() -> None:
     assert env["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] == "1"
     assert env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] == "1000000"
     assert env["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
+    assert env["AUTO_PROMPT_ENHANCER"] == "true"
+    assert env["PROMPT_ENHANCER_MODEL"] == "claude-haiku-4-5-20251001"
+    assert env["PROMPT_ENHANCER_TIMEOUT"] == "12.0"
+    assert env["PROMPT_ENHANCER_MAX_OUTPUT_CHARS"] == "2000"
+    assert env["FCC_PACKAGE_ROOT"]
     assert "ANTHROPIC_API_KEY" not in env
 
 
@@ -426,6 +439,59 @@ def test_launch_claude_keyboard_interrupt_kills_child_tree(tmp_path: Path) -> No
 
     kill_tree.assert_called_once_with(12345)
     unregister_pid.assert_called_once_with(12345)
+
+
+def test_launch_claude_finalizer_error_does_not_mask_keyboard_interrupt(
+    tmp_path: Path,
+) -> None:
+    from cli.entrypoints import launch_claude
+
+    settings = _launcher_settings(port=9191, token="proxy-token")
+
+    with (
+        patch("cli.entrypoints.get_settings", return_value=settings),
+        patch("cli.entrypoints._preflight_proxy", return_value=None),
+        patch("cli.entrypoints.shutil.which", return_value="resolved-claude.cmd"),
+        patch("cli.entrypoints.maybe_update_claude_code"),
+        patch("cli.entrypoints.subprocess.Popen") as popen,
+        patch("cli.session_registry.process_is_running", return_value=False),
+        patch("cli.entrypoints.register_pid"),
+        patch("cli.entrypoints.kill_pid_tree_best_effort"),
+        patch("cli.entrypoints.unregister_pid"),
+        patch(
+            "cli.entrypoints._finish_registered_terminal_session",
+            side_effect=RuntimeError("database locked"),
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        process = popen.return_value
+        process.pid = 12345
+        process.wait.side_effect = [KeyboardInterrupt, 0]
+
+        launch_claude([str(tmp_path)], auto_resume=False)
+
+
+def test_session_heartbeat_logs_and_continues_after_registry_error() -> None:
+    from cli.entrypoints import _start_session_heartbeat
+
+    registry = MagicMock()
+    registry.heartbeat.side_effect = RuntimeError("database locked")
+    stop_event = MagicMock()
+    stop_event.wait.side_effect = [False, True]
+
+    class ImmediateThread:
+        def __init__(self, *, target, name, daemon):
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+
+        def start(self):
+            self.target()
+
+    with patch("cli.entrypoints.threading.Thread", ImmediateThread):
+        _start_session_heartbeat(registry, "session-1", stop_event)
+
+    registry.heartbeat.assert_called_once_with("session-1")
 
 
 def test_launch_claude_exits_when_command_cannot_be_resolved(

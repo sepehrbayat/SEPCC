@@ -596,6 +596,34 @@ def test_service_rejects_listed_server_tools_on_openai_chat() -> None:
         service.create_message(request)
 
 
+def test_service_rejects_listed_server_tools_on_all_openai_chat_providers() -> None:
+    settings = Settings()
+    request = MessagesRequest(
+        model="m",
+        max_tokens=20,
+        messages=[Message(role="user", content="q")],
+        tools=[Tool(name="web_search", type="web_search_20250305")],
+    )
+
+    for provider_id in (
+        "nvidia_nim",
+        "gemini",
+        "mistral",
+        "mistral_codestral",
+        "opencode",
+        "opencode_go",
+        "cerebras",
+        "groq",
+    ):
+        service = ClaudeProxyService(
+            settings,
+            provider_getter=lambda _: MagicMock(),
+            model_router=FixedProviderModelRouter(settings, provider_id),
+        )
+        with pytest.raises(InvalidRequestError, match="OpenAI Chat upstreams"):
+            service.create_message(request)
+
+
 def test_listed_server_tools_routed_on_open_router() -> None:
     """Native Anthropic transport may receive listed server tool definitions."""
     settings = Settings()

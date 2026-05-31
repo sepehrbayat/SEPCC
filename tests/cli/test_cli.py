@@ -142,6 +142,23 @@ class TestCLIParser:
         result = parse_cli_event("not a dict")
         assert result == []
 
+    def test_parse_prompt_enhancement_event(self):
+        """Prompt enhancement events are status-only metadata for messaging UIs."""
+        event = {
+            "type": "prompt_enhancement",
+            "status": "enhanced",
+            "enhanced_prompt": "Fix the login bug and run regression tests.",
+        }
+        result = parse_cli_event(event)
+
+        assert result == [
+            {
+                "type": "prompt_enhancement",
+                "status": "enhanced",
+                "enhanced_prompt": "Fix the login bug and run regression tests.",
+            }
+        ]
+
 
 # --- CLI Session Tests ---
 
@@ -350,6 +367,88 @@ class TestCLISession:
         assert events[-1]["code"] == 0
 
     @pytest.mark.asyncio
+    async def test_start_task_stops_process_on_stdout_exception(self):
+        """Unexpected stdout read errors must not leave the CLI process orphaned."""
+        from cli.session import CLISession
+
+        session = CLISession("/tmp", "http://localhost:8082/v1")
+
+        mock_process = AsyncMock()
+        mock_process.pid = 1234
+        mock_process.returncode = None
+        mock_process.stdout.read.side_effect = ConnectionResetError("pipe reset")
+        mock_process.stderr.read.return_value = b""
+
+        with (
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec,
+            patch.object(CLISession, "stop", new_callable=AsyncMock) as stop_mock,
+        ):
+            stop_mock.return_value = True
+            mock_exec.return_value = mock_process
+            with pytest.raises(ConnectionResetError):
+                async for _ in session.start_task("Hello"):
+                    pass
+
+        stop_mock.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_start_task_stops_process_on_stdout_idle_timeout(self):
+        """A child that starts but never emits stdout should not hang forever."""
+        from cli.session import CLISession
+
+        class HangingStdout:
+            async def read(self, _n):
+                await asyncio.Event().wait()
+                return b""
+
+        session = CLISession(
+            "/tmp", "http://localhost:8082/v1", stdout_idle_timeout=0.01
+        )
+
+        mock_process = AsyncMock()
+        mock_process.pid = 1234
+        mock_process.returncode = None
+        mock_process.stdout = HangingStdout()
+        mock_process.stderr.read.return_value = b""
+
+        with (
+            patch(
+                "asyncio.create_subprocess_exec", new_callable=AsyncMock
+            ) as mock_exec,
+            patch.object(CLISession, "stop", new_callable=AsyncMock) as stop_mock,
+        ):
+            stop_mock.return_value = True
+            mock_exec.return_value = mock_process
+            events = [e async for e in session.start_task("Hello")]
+
+        stop_mock.assert_awaited_once()
+        assert events[0]["type"] == "error"
+        assert "no stdout" in events[0]["error"]["message"]
+        assert events[1]["type"] == "exit"
+        assert events[1]["code"] == 1
+
+    @pytest.mark.asyncio
+    async def test_start_task_resets_busy_when_launch_setup_fails(self):
+        """Launch setup errors must not leave the session permanently busy."""
+        from cli.session import CLISession
+
+        session = CLISession("/tmp", "http://localhost:8082/v1")
+
+        with (
+            patch(
+                "cli.session.maybe_update_claude_code",
+                side_effect=RuntimeError("update failed"),
+            ),
+            pytest.raises(RuntimeError, match="update failed"),
+        ):
+            async for _ in session.start_task("Hello"):
+                pass
+
+        assert session.is_busy is False
+
+    @pytest.mark.asyncio
     async def test_drain_stderr_bounded_retains_cap_but_drains_to_eof(self):
         """Oversized stderr is fully drained so the pipe cannot deadlock; capture is bounded."""
         from cli.session import _MAX_STDERR_CAPTURE_BYTES, CLISession
@@ -453,6 +552,34 @@ class TestCLISession:
 
             assert len(events) == 1
             assert events[0]["content"] == "Split"
+
+    @pytest.mark.asyncio
+    async def test_start_task_extracts_session_id_once_in_multiline_buffer(self):
+        """Multiple session-bearing lines in one chunk should not duplicate session_info."""
+        from cli.session import CLISession
+
+        session = CLISession("/tmp", "http://localhost:8082/v1")
+
+        mock_process = AsyncMock()
+        mock_process.stdout.read.side_effect = [
+            (
+                b'{"type": "message", "content": "Hi"}\n'
+                b'{"session_id": "sess_1"}\n'
+                b'{"sessionId": "sess_1"}\n'
+            ),
+            b"",
+        ]
+        mock_process.stderr.read.return_value = b""
+        mock_process.wait.return_value = 0
+
+        with patch(
+            "asyncio.create_subprocess_exec", new_callable=AsyncMock
+        ) as mock_exec:
+            mock_exec.return_value = mock_process
+            events = [e async for e in session.start_task("test")]
+
+        session_info_events = [e for e in events if e.get("type") == "session_info"]
+        assert session_info_events == [{"type": "session_info", "session_id": "sess_1"}]
 
     @pytest.mark.asyncio
     async def test_start_task_remnant_buffer(self):
@@ -563,21 +690,32 @@ class TestCLISession:
             assert "ANTHROPIC_AUTH_TOKEN" not in env
 
     @pytest.mark.asyncio
-    async def test_prompt_enhancer_receives_max_output_chars(self, monkeypatch):
-        """Test the configured prompt enhancer output cap is passed to core."""
+    async def test_prompt_enhancer_receives_config_and_emits_visible_event(
+        self, monkeypatch
+    ):
+        """Configured enhancer model/output cap are passed through and surfaced."""
         from cli.session import CLISession
+        from core.prompt_enhancer import PromptEnhancementResult
 
-        seen: dict[str, int] = {}
+        seen: dict[str, object] = {}
 
         async def fake_enhance(prompt, workspace_path, **kwargs):
+            seen["model"] = kwargs["model"]
             seen["max_output_chars"] = kwargs["max_output_chars"]
-            return prompt
+            return PromptEnhancementResult(
+                original_prompt=prompt,
+                enhanced_prompt=f"{prompt} with project context",
+                status="enhanced",
+            )
 
-        monkeypatch.setattr("core.prompt_enhancer.enhance_prompt", fake_enhance)
+        monkeypatch.setattr(
+            "core.prompt_enhancer.enhance_prompt_with_metadata", fake_enhance
+        )
 
         session = CLISession(
             "/tmp",
             "http://localhost:8082/v1",
+            prompt_enhancer_model="custom-enhancer-model",
             prompt_enhancer_max_output_chars=123,
         )
 
@@ -590,10 +728,12 @@ class TestCLISession:
             "asyncio.create_subprocess_exec", new_callable=AsyncMock
         ) as mock_exec:
             mock_exec.return_value = mock_process
-            async for _ in session.start_task("test"):
-                pass
+            events = [e async for e in session.start_task("test")]
 
+        assert seen["model"] == "custom-enhancer-model"
         assert seen["max_output_chars"] == 123
+        assert events[0]["type"] == "prompt_enhancement"
+        assert events[0]["enhanced_prompt"] == "test with project context"
 
     @pytest.mark.asyncio
     async def test_start_task_allowed_dirs(self):

@@ -1,5 +1,8 @@
 {
   "env": {
+    "AUTO_PROMPT_ENHANCER": "true",
+    "PROMPT_ENHANCER_MAX_OUTPUT_CHARS": "2000",
+    "PROMPT_ENHANCER_TIMEOUT": "12",
     "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE": "1"
   },
   "statusLine": {

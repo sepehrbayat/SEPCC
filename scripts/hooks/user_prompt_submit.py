@@ -6,6 +6,7 @@ from _shared import (
     emit_hook_json,
     name_active_session,
     project_root,
+    prompt_enhancement_outputs,
     prompt_routing_hint,
     read_hook_input,
     run_hook,
@@ -19,8 +20,20 @@ def main() -> None:
     root = project_root(data)
     name = session_name_from_prompt(prompt)
     name_active_session(root, name)
-    payload = prompt_routing_hint(prompt)
-    emit_hook_json("UserPromptSubmit", additional_context=payload)
+    enhancement_context, enhancement_message = prompt_enhancement_outputs(prompt, root)
+    payload = " ".join(
+        part
+        for part in (
+            enhancement_context,
+            prompt_routing_hint(prompt),
+        )
+        if part
+    )
+    emit_hook_json(
+        "UserPromptSubmit",
+        additional_context=payload,
+        system_message=enhancement_message,
+    )
 
 
 if __name__ == "__main__":

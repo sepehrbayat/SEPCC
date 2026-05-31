@@ -1,0 +1,23 @@
+{
+  "_optionalExamples": {
+    "claude-context": {
+      "_comment": "Optional only. Add through fcc-bootstrap-context --large-repo when Token Savior is not enough for a large repository."
+    }
+  },
+  "mcpServers": {
+    "token-savior": {
+      "args": [
+        "--from",
+        "token-savior-recall==4.4.1",
+        "token-savior",
+        "server"
+      ],
+      "command": "uvx",
+      "env": {
+        "TOKEN_SAVIOR_CLIENT": "claude-code",
+        "TOKEN_SAVIOR_PROFILE": "optimized",
+        "WORKSPACE_ROOTS": "${CLAUDE_PROJECT_DIR:-.}"
+      }
+    }
+  }
+}

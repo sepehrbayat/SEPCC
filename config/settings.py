@@ -359,6 +359,9 @@ class Settings(BaseSettings):
     auto_prompt_enhancer: bool = Field(
         default=True, validation_alias="AUTO_PROMPT_ENHANCER"
     )
+    prompt_enhancer_model: str = Field(
+        default="claude-haiku-4-5-20251001", validation_alias="PROMPT_ENHANCER_MODEL"
+    )
     prompt_enhancer_timeout: float = Field(
         default=12.0, validation_alias="PROMPT_ENHANCER_TIMEOUT"
     )

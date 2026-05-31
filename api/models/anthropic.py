@@ -3,7 +3,9 @@
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from core.anthropic.content import get_block_attr, get_block_type
 
 
 # =============================================================================
@@ -88,6 +90,72 @@ class SystemContent(_AnthropicBlockBase):
     text: str
 
 
+def _extract_system_message_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for block in content:
+            if get_block_type(block) != "text":
+                continue
+            text = get_block_attr(block, "text", "")
+            if isinstance(text, str) and text:
+                text_parts.append(text)
+        return "\n\n".join(text_parts)
+    if isinstance(content, dict):
+        if content.get("type") != "text":
+            return ""
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+    return "" if content is None else str(content)
+
+
+def _append_system_text(system: Any, system_texts: list[str]) -> Any:
+    text_parts = [text for text in system_texts if text]
+    if not text_parts:
+        return system
+
+    if isinstance(system, list):
+        return [
+            *system,
+            *({"type": "text", "text": text} for text in text_parts),
+        ]
+
+    appended = "\n\n".join(text_parts)
+    if isinstance(system, str):
+        return f"{system}\n\n{appended}" if system else appended
+    if system is None:
+        return appended
+    return appended
+
+
+def _normalize_system_role_messages(data: Any) -> Any:
+    """Move OpenAI-style system-role messages into Anthropic's top-level system."""
+    if not isinstance(data, dict):
+        return data
+
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return data
+
+    normalized_messages: list[Any] = []
+    system_texts: list[str] = []
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == Role.system:
+            system_texts.append(_extract_system_message_text(message.get("content")))
+            continue
+        normalized_messages.append(message)
+
+    if not system_texts:
+        return data
+
+    normalized = dict(data)
+    normalized["messages"] = normalized_messages
+    normalized["system"] = _append_system_text(normalized.get("system"), system_texts)
+    return normalized
+
+
 # =============================================================================
 # Message Types
 # =============================================================================
@@ -156,6 +224,11 @@ class MessagesRequest(BaseModel):
     # Beta feature flags sent by Claude Code as a body field; accepted but never forwarded.
     betas: list[str] | None = Field(default=None, exclude=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_system_role_messages(cls, data: Any) -> Any:
+        return _normalize_system_role_messages(data)
+
 
 class TokenCountRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -172,3 +245,8 @@ class TokenCountRequest(BaseModel):
     output_config: dict[str, Any] | None = None
     mcp_servers: list[dict[str, Any]] | None = None
     betas: list[str] | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_system_role_messages(cls, data: Any) -> Any:
+        return _normalize_system_role_messages(data)

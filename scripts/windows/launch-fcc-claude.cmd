@@ -77,13 +77,24 @@ if errorlevel 1 (
 REM --------------------------------------------------------------------
 REM Phase 1: Start the proxy server
 REM --------------------------------------------------------------------
-start "SEPCC Server" cmd /k "cd /d %FCC_REPO% && set FCC_OPEN_BROWSER=0 && uv run fcc-server"
-
 set "FCC_PORT=8082"
 set "FCC_PORT_FILE=%TEMP%\fcc-port-%RANDOM%.txt"
 uv run python "%FCC_REPO%\scripts\windows\get-fcc-port.py" > "%FCC_PORT_FILE%" 2>nul
 if exist "%FCC_PORT_FILE%" set /p FCC_PORT=<"%FCC_PORT_FILE%"
 del "%FCC_PORT_FILE%" 2>nul
+
+if exist "%FCC_REPO%\scripts\windows\stop-fcc-server-on-port.ps1" (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%FCC_REPO%\scripts\windows\stop-fcc-server-on-port.ps1" -Port "%FCC_PORT%" -Repo "%FCC_REPO%"
+    if errorlevel 1 (
+        echo.
+        echo Could not stop the existing SEPCC server on port %FCC_PORT%.
+        echo Close the "SEPCC Server" window and try again.
+        pause
+        exit /b 1
+    )
+)
+
+start "SEPCC Server" cmd /k "cd /d %FCC_REPO% && set FCC_OPEN_BROWSER=0 && uv run fcc-server"
 
 echo Waiting for the proxy to become healthy on port %FCC_PORT%...
 powershell -NoProfile -Command "for ($i = 0; $i -lt 30; $i++) { try { Invoke-WebRequest -Uri ('http://127.0.0.1:' + $env:FCC_PORT + '/health') -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep -Seconds 1 } }; exit 1"

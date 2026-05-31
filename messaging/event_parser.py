@@ -32,6 +32,15 @@ def parse_cli_event(event: Any, *, log_raw_cli: bool = False) -> list[dict]:
     if etype == "system":
         return []
 
+    if etype == "prompt_enhancement":
+        return [
+            {
+                "type": "prompt_enhancement",
+                "status": event.get("status", ""),
+                "enhanced_prompt": event.get("enhanced_prompt", ""),
+            }
+        ]
+
     # 1. Handle full messages (assistant/user or result)
     msg_obj = None
     if etype == "assistant" or etype == "user":

@@ -95,6 +95,42 @@ def test_create_message_stream(client: TestClient):
     assert b"message_start" in content or b"event:" in content
 
 
+def test_create_message_accepts_system_role_message(client: TestClient):
+    """OpenAI-style system messages are accepted and normalized before routing."""
+    mock_provider.stream_response = _mock_stream_response
+    _stream_response_calls.clear()
+
+    payload = {
+        "model": "claude-3-sonnet",
+        "messages": [
+            {"role": "user", "content": "Hi"},
+            {"role": "system", "content": "Speak tersely."},
+        ],
+        "max_tokens": 100,
+        "stream": True,
+    }
+
+    response = client.post("/v1/messages", json=payload)
+
+    assert response.status_code == 200
+    request = _stream_response_calls[0][0][0]
+    assert [message.role for message in request.messages] == ["user"]
+    assert request.system == "Speak tersely."
+
+
+def test_create_message_all_system_role_messages_returns_400(client: TestClient):
+    payload = {
+        "model": "claude-3-sonnet",
+        "messages": [{"role": "system", "content": "Only rules."}],
+        "max_tokens": 100,
+    }
+
+    response = client.post("/v1/messages", json=payload)
+
+    assert response.status_code == 400
+    assert "cannot be empty" in response.json()["error"]["message"]
+
+
 def test_model_mapping(client: TestClient):
     # Test Haiku mapping
     _stream_response_calls.clear()
@@ -235,6 +271,26 @@ def test_count_tokens_endpoint(client: TestClient):
     )
     assert response.status_code == 200
     assert "input_tokens" in response.json()
+
+
+def test_count_tokens_accepts_system_role_message(client: TestClient):
+    """Token counting uses the normalized top-level system prompt."""
+    payload = {
+        "model": "test",
+        "messages": [
+            {"role": "system", "content": "Count this as system."},
+            {"role": "user", "content": "Hello"},
+        ],
+    }
+
+    with patch("api.routes.get_token_count", return_value=7) as token_counter:
+        response = client.post("/v1/messages/count_tokens", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["input_tokens"] == 7
+    messages, system, _tools = token_counter.call_args.args
+    assert [message.role for message in messages] == ["user"]
+    assert system == "Count this as system."
 
 
 def test_stop_endpoint_no_handler_no_cli_503(client: TestClient):

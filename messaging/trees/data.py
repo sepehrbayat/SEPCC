@@ -23,7 +23,7 @@ class _SnapshotQueue:
         self._deque: deque[str] = deque()
         self._set: set[str] = set()
 
-    async def put(self, item: str) -> None:
+    def put(self, item: str) -> None:
         self._deque.append(item)
         self._set.add(item)
 
@@ -113,6 +113,7 @@ class MessageNode:
             if self.completed_at
             else None,
             "error_message": self.error_message,
+            "context": self.context,
         }
 
     @classmethod
@@ -129,11 +130,16 @@ class MessageNode:
             message_thread_id=incoming_data.get("message_thread_id"),
             username=incoming_data.get("username"),
         )
+        try:
+            state = MessageState(data["state"])
+        except KeyError, ValueError:
+            state = MessageState.ERROR
+
         return cls(
             node_id=data["node_id"],
             incoming=incoming,
             status_message_id=data["status_message_id"],
-            state=MessageState(data["state"]),
+            state=state,
             parent_id=data.get("parent_id"),
             session_id=data.get("session_id"),
             children_ids=data.get("children_ids", []),
@@ -142,6 +148,7 @@ class MessageNode:
             if data.get("completed_at")
             else None,
             error_message=data.get("error_message"),
+            context=data.get("context"),
         )
 
 
@@ -285,7 +292,7 @@ class MessageTree:
             Queue position (1-indexed)
         """
         async with self._lock:
-            await self._queue.put(node_id)
+            self._queue.put(node_id)
             position = self._queue.qsize()
             logger.debug(f"Enqueued node {node_id}, position {position}")
             return position

@@ -243,6 +243,53 @@ async def test_handle_message_queued(handler, mock_platform, incoming_message_fa
 
 
 @pytest.mark.asyncio
+async def test_handle_message_failed_status_send_does_not_enqueue_reply(
+    handler, mock_platform, mock_session_store, incoming_message_factory
+):
+    root_incoming = incoming_message_factory(
+        text="root", message_id="root", reply_to_message_id=None
+    )
+    tree = await handler.tree_queue.create_tree(
+        node_id="root",
+        incoming=root_incoming,
+        status_message_id="status_root",
+    )
+    handler.tree_queue.register_node("status_root", tree.root_id)
+    incoming = incoming_message_factory(
+        text="reply", message_id="reply", reply_to_message_id="status_root"
+    )
+    mock_platform.queue_send_message.return_value = None
+
+    with patch.object(handler.tree_queue, "enqueue", AsyncMock()) as enqueue:
+        await handler.handle_message(incoming)
+
+    enqueue.assert_not_awaited()
+    mock_session_store.save_tree.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_queued_position_never_displays_zero(
+    handler, mock_platform, incoming_message_factory
+):
+    incoming = incoming_message_factory(text="hello", message_id="msg_1")
+    mock_platform.queue_send_message.return_value = "status_123"
+
+    with (
+        patch.object(handler.tree_queue, "create_tree", AsyncMock()) as mock_create,
+        patch.object(handler.tree_queue, "enqueue", AsyncMock(return_value=True)),
+        patch.object(handler.tree_queue, "get_queue_size", MagicMock(return_value=0)),
+    ):
+        mock_tree = MagicMock()
+        mock_tree.root_id = "root_1"
+        mock_tree.to_dict.return_value = {}
+        mock_create.return_value = mock_tree
+
+        await handler.handle_message(incoming)
+
+    assert "position 1" in mock_platform.queue_edit_message.call_args.args[2]
+
+
+@pytest.mark.asyncio
 async def test_update_queue_positions(handler, mock_platform):
     root_incoming = IncomingMessage(
         text="Root",
@@ -343,6 +390,28 @@ async def test_mark_node_processing(handler, mock_platform):
     assert args[1] == "status_child"
     assert "Processing" in args[2]
     assert kwargs["parse_mode"] == "MarkdownV2"
+
+
+@pytest.mark.asyncio
+async def test_mark_node_processing_skips_cancelled_node(handler, mock_platform):
+    root_incoming = IncomingMessage(
+        text="Root",
+        chat_id="chat_1",
+        user_id="user_1",
+        message_id="root",
+        platform="telegram",
+    )
+    root = MessageNode(
+        node_id="root",
+        incoming=root_incoming,
+        status_message_id="status_root",
+    )
+    tree = MessageTree(root)
+    await tree.update_state("root", MessageState.ERROR, error_message="cancelled")
+
+    await handler.mark_node_processing(tree, "root")
+
+    mock_platform.queue_edit_message.assert_not_called()
 
 
 @pytest.mark.asyncio

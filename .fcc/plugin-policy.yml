@@ -1,0 +1,18 @@
+owners:
+  provider_router: FCC
+  persistent_memory: MemSearch
+  code_retrieval: Token Savior
+optional_plugins:
+  ralph-loop:
+    enabled: false
+    max_iterations: 3
+    completion_criteria_required: true
+    verification_required: true
+    use_when: bounded_verified_loop
+  claude-context-mcp:
+    enabled: false
+    use_when: large_repo_only
+  context-mode:
+    enabled: false
+  claude-mem:
+    enabled: false

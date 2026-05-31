@@ -34,6 +34,7 @@ class CLISessionManager:
         log_raw_cli_diagnostics: bool = False,
         log_messaging_error_details: bool = False,
         auto_prompt_enhancer: bool = True,
+        prompt_enhancer_model: str = "claude-haiku-4-5-20251001",
         prompt_enhancer_timeout: float = 12.0,
         prompt_enhancer_max_output_chars: int = 2000,
     ):
@@ -55,6 +56,7 @@ class CLISessionManager:
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
         self._log_messaging_error_details = log_messaging_error_details
         self._prompt_enhancer_enabled = auto_prompt_enhancer
+        self._prompt_enhancer_model = prompt_enhancer_model
         self._prompt_enhancer_timeout = prompt_enhancer_timeout
         self._prompt_enhancer_max_output_chars = prompt_enhancer_max_output_chars
 
@@ -82,7 +84,14 @@ class CLISessionManager:
                 if lookup_id in self._pending_sessions:
                     return self._pending_sessions[lookup_id], lookup_id, False
 
-            temp_id = session_id if session_id else f"pending_{uuid.uuid4().hex[:8]}"
+                stale_real_id = self._temp_to_real.pop(session_id, None)
+                if stale_real_id is not None:
+                    self._real_to_temp.pop(stale_real_id, None)
+                stale_temp_id = self._real_to_temp.pop(session_id, None)
+                if stale_temp_id is not None:
+                    self._temp_to_real.pop(stale_temp_id, None)
+
+            temp_id = f"pending_{uuid.uuid4().hex[:8]}"
 
             new_session = CLISession(
                 workspace_path=self.workspace,
@@ -93,6 +102,7 @@ class CLISessionManager:
                 auth_token=self.auth_token,
                 log_raw_cli_diagnostics=self._log_raw_cli_diagnostics,
                 auto_prompt_enhancer=self._prompt_enhancer_enabled,
+                prompt_enhancer_model=self._prompt_enhancer_model,
                 prompt_enhancer_timeout=self._prompt_enhancer_timeout,
                 prompt_enhancer_max_output_chars=self._prompt_enhancer_max_output_chars,
             )
@@ -104,18 +114,42 @@ class CLISessionManager:
         self, temp_id: str, real_session_id: str
     ) -> bool:
         """Register the real session ID from CLI output."""
+        old_session_to_stop: CLISession | None = None
         async with self._lock:
             if temp_id not in self._pending_sessions:
                 logger.warning(f"Temp session {temp_id} not found")
                 return False
 
             session = self._pending_sessions.pop(temp_id)
+            old_session = self._sessions.get(real_session_id)
+            if old_session is not None and old_session is not session:
+                old_temp_id = self._real_to_temp.pop(real_session_id, None)
+                if old_temp_id is not None:
+                    self._temp_to_real.pop(old_temp_id, None)
+                old_session_to_stop = old_session
+
             self._sessions[real_session_id] = session
             self._temp_to_real[temp_id] = real_session_id
             self._real_to_temp[real_session_id] = temp_id
 
             logger.info(f"Registered session: {temp_id} -> {real_session_id}")
-            return True
+
+        if old_session_to_stop is not None:
+            try:
+                await old_session_to_stop.stop()
+            except Exception as e:
+                if self._log_messaging_error_details:
+                    logger.error(
+                        "Error stopping overwritten session: {}: {}",
+                        type(e).__name__,
+                        e,
+                    )
+                else:
+                    logger.error(
+                        "Error stopping overwritten session: exc_type={}",
+                        type(e).__name__,
+                    )
+        return True
 
     async def remove_session(self, session_id: str) -> bool:
         """Remove a session from the manager."""
@@ -162,6 +196,21 @@ class CLISessionManager:
             self._temp_to_real.clear()
             self._real_to_temp.clear()
             logger.info("All sessions stopped")
+
+    @property
+    def prompt_enhancer_timeout(self) -> float:
+        """Timeout for prompt enhancement calls."""
+        return self._prompt_enhancer_timeout
+
+    @property
+    def prompt_enhancer_model(self) -> str:
+        """Model used for prompt enhancement calls."""
+        return self._prompt_enhancer_model
+
+    @property
+    def prompt_enhancer_max_output_chars(self) -> int:
+        """Maximum enhanced prompt length."""
+        return self._prompt_enhancer_max_output_chars
 
     def get_stats(self) -> dict:
         """Get session statistics."""

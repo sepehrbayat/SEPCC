@@ -18,6 +18,11 @@ _RUNTIME_EXTRAS = {
     "whisper_device": "cpu",
     "hf_token": "",
     "nvidia_nim_api_key": "",
+    "anthropic_auth_token": "",
+    "auto_prompt_enhancer": True,
+    "prompt_enhancer_model": "claude-haiku-4-5-20251001",
+    "prompt_enhancer_timeout": 12.0,
+    "prompt_enhancer_max_output_chars": 2000,
     "claude_cli_bin": "claude",
     "uses_process_anthropic_auth_token": lambda: False,
     "messaging_rate_limit": 1,
@@ -438,6 +443,31 @@ async def test_runtime_startup_validation_failure_does_not_block_server(tmp_path
     assert "bad model" in logged
     assert "Traceback" not in logged
     assert app.state.startup_validation_error == "bad model"
+
+
+@pytest.mark.asyncio
+async def test_start_message_handler_requires_initialized_platform(tmp_path):
+    import api.runtime as api_runtime_mod
+
+    settings = _app_settings(
+        messaging_platform="telegram",
+        telegram_bot_token="token",
+        allowed_telegram_user_id="123",
+        discord_bot_token=None,
+        allowed_discord_channels=None,
+        allowed_dir=str(tmp_path / "workspace"),
+        claude_workspace=str(tmp_path / "data"),
+        host="127.0.0.1",
+        port=8082,
+    )
+    runtime = api_runtime_mod.AppRuntime(
+        app=FastAPI(),
+        settings=cast(Settings, settings),
+        messaging_platform=None,
+    )
+
+    with pytest.raises(RuntimeError, match="Messaging platform was not initialized"):
+        await runtime._start_message_handler()
 
 
 @pytest.mark.asyncio

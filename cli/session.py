@@ -16,6 +16,9 @@ from .process_registry import kill_pid_tree_best_effort, register_pid, unregiste
 
 # Cap stderr capture so a runaway child cannot exhaust memory; pipe is still drained.
 _MAX_STDERR_CAPTURE_BYTES = 256 * 1024
+_STDOUT_READ_CHUNK_BYTES = 65_536
+_STDOUT_IDLE_TIMEOUT_SECONDS = 300.0
+_DEFAULT_PROMPT_ENHANCER_MODEL = "claude-haiku-4-5-20251001"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,8 +32,10 @@ class ClaudeCliConfig:
     claude_bin: str = "claude"
     auth_token: str = ""
     auto_prompt_enhancer: bool = True
+    prompt_enhancer_model: str = _DEFAULT_PROMPT_ENHANCER_MODEL
     prompt_enhancer_timeout: float = 12.0
     prompt_enhancer_max_output_chars: int = 2000
+    stdout_idle_timeout: float = _STDOUT_IDLE_TIMEOUT_SECONDS
 
 
 class CLISession:
@@ -47,8 +52,10 @@ class CLISession:
         *,
         log_raw_cli_diagnostics: bool = False,
         auto_prompt_enhancer: bool = True,
+        prompt_enhancer_model: str = _DEFAULT_PROMPT_ENHANCER_MODEL,
         prompt_enhancer_timeout: float = 12.0,
         prompt_enhancer_max_output_chars: int = 2000,
+        stdout_idle_timeout: float = _STDOUT_IDLE_TIMEOUT_SECONDS,
     ):
         self.config = ClaudeCliConfig(
             workspace_path=os.path.normpath(os.path.abspath(workspace_path)),
@@ -58,8 +65,10 @@ class CLISession:
             claude_bin=claude_bin,
             auth_token=auth_token,
             auto_prompt_enhancer=auto_prompt_enhancer,
+            prompt_enhancer_model=prompt_enhancer_model,
             prompt_enhancer_timeout=prompt_enhancer_timeout,
             prompt_enhancer_max_output_chars=prompt_enhancer_max_output_chars,
+            stdout_idle_timeout=stdout_idle_timeout,
         )
         self.workspace = self.config.workspace_path
         self.api_url = self.config.api_url
@@ -68,9 +77,6 @@ class CLISession:
         self.claude_bin = self.config.claude_bin
         self.auth_token = self.config.auth_token
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
-        self._enhancer_enabled = auto_prompt_enhancer
-        self._enhancer_timeout = prompt_enhancer_timeout
-        self._enhancer_max_output_chars = prompt_enhancer_max_output_chars
         self.process: asyncio.subprocess.Process | None = None
         self.current_session_id: str | None = None
         self._is_busy = False
@@ -109,23 +115,47 @@ class CLISession:
         """Check if a task is currently running."""
         return self._is_busy
 
-    async def _maybe_enhance_prompt(self, prompt: str) -> str:
+    async def _maybe_enhance_prompt(
+        self, prompt: str
+    ) -> tuple[str, dict[str, Any] | None]:
         """Enhance the prompt using project context when auto enhancer is enabled."""
-        if not self._enhancer_enabled:
-            return prompt
+        if not self.config.auto_prompt_enhancer:
+            return prompt, None
         try:
-            from core.prompt_enhancer import enhance_prompt
+            from core.prompt_enhancer import enhance_prompt_with_metadata
 
-            return await enhance_prompt(
+            result = await enhance_prompt_with_metadata(
                 prompt,
                 self.workspace,
                 api_url=self.api_url.removesuffix("/v1") + "/v1/messages",
                 api_key=self.auth_token.strip(),
-                timeout=self._enhancer_timeout,
-                max_output_chars=self._enhancer_max_output_chars,
+                model=self.config.prompt_enhancer_model,
+                timeout=self.config.prompt_enhancer_timeout,
+                max_output_chars=self.config.prompt_enhancer_max_output_chars,
             )
-        except Exception:
-            return prompt
+            if result.changed:
+                return result.enhanced_prompt, {
+                    "type": "prompt_enhancement",
+                    "status": result.status,
+                    "original_chars": len(result.original_prompt),
+                    "enhanced_prompt": result.enhanced_prompt,
+                }
+            return result.enhanced_prompt, None
+        except Exception as exc:
+            logger.warning(
+                "Prompt enhancement failed before CLI launch: exc_type={}",
+                type(exc).__name__,
+            )
+            return prompt, None
+
+    async def _read_stdout_chunk(self) -> bytes:
+        if not self.process or not self.process.stdout:
+            return b""
+        read = self.process.stdout.read(_STDOUT_READ_CHUNK_BYTES)
+        timeout = self.config.stdout_idle_timeout
+        if timeout <= 0:
+            return await read
+        return await asyncio.wait_for(read, timeout=timeout)
 
     async def start_task(
         self, prompt: str, session_id: str | None = None, fork_session: bool = False
@@ -142,76 +172,80 @@ class CLISession:
         """
         async with self._cli_lock:
             self._is_busy = True
-            await asyncio.to_thread(maybe_update_claude_code, self.claude_bin)
-            prompt = await self._maybe_enhance_prompt(prompt)
-            env = os.environ.copy()
+            try:
+                await asyncio.to_thread(maybe_update_claude_code, self.claude_bin)
+                prompt, enhancement_event = await self._maybe_enhance_prompt(prompt)
+                env = os.environ.copy()
 
-            env["ANTHROPIC_API_URL"] = self.api_url
-            if self.api_url.endswith("/v1"):
-                env["ANTHROPIC_BASE_URL"] = self.api_url[:-3]
-            else:
-                env["ANTHROPIC_BASE_URL"] = self.api_url
-            apply_claude_code_runtime_env(env)
-            env.pop("ANTHROPIC_API_KEY", None)
-            if token := self.auth_token.strip():
-                env["ANTHROPIC_AUTH_TOKEN"] = token
-            else:
-                env.pop("ANTHROPIC_AUTH_TOKEN", None)
+                env["ANTHROPIC_API_URL"] = self.api_url
+                if self.api_url.endswith("/v1"):
+                    env["ANTHROPIC_BASE_URL"] = self.api_url[:-3]
+                else:
+                    env["ANTHROPIC_BASE_URL"] = self.api_url
+                apply_claude_code_runtime_env(env)
+                env.pop("ANTHROPIC_API_KEY", None)
+                if token := self.auth_token.strip():
+                    env["ANTHROPIC_AUTH_TOKEN"] = token
+                else:
+                    env.pop("ANTHROPIC_AUTH_TOKEN", None)
 
-            env["TERM"] = "dumb"
-            env["PYTHONIOENCODING"] = "utf-8"
+                env["TERM"] = "dumb"
+                env["PYTHONIOENCODING"] = "utf-8"
 
-            # Build command
-            if session_id and not session_id.startswith("pending_"):
-                cmd = [
-                    self.claude_bin,
-                    "--resume",
-                    session_id,
-                ]
-                if fork_session:
-                    cmd.append("--fork-session")
-                cmd += [
-                    "-p",
-                    prompt,
-                    "--output-format",
-                    "stream-json",
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                ]
-            else:
-                cmd = [
-                    self.claude_bin,
-                    "-p",
-                    prompt,
-                    "--output-format",
-                    "stream-json",
-                    "--dangerously-skip-permissions",
-                    "--verbose",
-                ]
+                # Build command
+                if session_id and not session_id.startswith("pending_"):
+                    cmd = [
+                        self.claude_bin,
+                        "--resume",
+                        session_id,
+                    ]
+                    if fork_session:
+                        cmd.append("--fork-session")
+                    cmd += [
+                        "-p",
+                        prompt,
+                        "--output-format",
+                        "stream-json",
+                        "--dangerously-skip-permissions",
+                        "--verbose",
+                    ]
+                else:
+                    cmd = [
+                        self.claude_bin,
+                        "-p",
+                        prompt,
+                        "--output-format",
+                        "stream-json",
+                        "--dangerously-skip-permissions",
+                        "--verbose",
+                    ]
 
-            if self.allowed_dirs:
-                for d in self.allowed_dirs:
-                    cmd.extend(["--add-dir", d])
+                if self.allowed_dirs:
+                    for d in self.allowed_dirs:
+                        cmd.extend(["--add-dir", d])
 
-            if self.plans_directory is not None:
-                settings_json = json.dumps({"plansDirectory": self.plans_directory})
-                cmd.extend(["--settings", settings_json])
+                if self.plans_directory is not None:
+                    settings_json = json.dumps({"plansDirectory": self.plans_directory})
+                    cmd.extend(["--settings", settings_json])
 
-            trace_event(
-                stage="claude_cli",
-                event="claude_cli.process.launch",
-                source="claude_cli",
-                resume_session_id=(
-                    session_id
-                    if session_id and not session_id.startswith("pending_")
-                    else None
-                ),
-                fork_session=fork_session,
-                prompt=prompt,
-                cwd=self.workspace,
-                claude_binary=self.claude_bin,
-                cli_argv=cmd,
-            )
+                trace_event(
+                    stage="claude_cli",
+                    event="claude_cli.process.launch",
+                    source="claude_cli",
+                    resume_session_id=(
+                        session_id
+                        if session_id and not session_id.startswith("pending_")
+                        else None
+                    ),
+                    fork_session=fork_session,
+                    prompt=prompt,
+                    cwd=self.workspace,
+                    claude_binary=self.claude_bin,
+                    cli_argv=cmd,
+                )
+            except BaseException:
+                self._is_busy = False
+                raise
 
             try:
                 self.process = await asyncio.create_subprocess_exec(
@@ -237,8 +271,11 @@ class CLISession:
                     )
 
                 try:
+                    if enhancement_event is not None:
+                        yield enhancement_event
+
                     while True:
-                        chunk = await self.process.stdout.read(65536)
+                        chunk = await self._read_stdout_chunk()
                         if not chunk:
                             if buffer:
                                 line_str = buffer.decode(
@@ -274,6 +311,17 @@ class CLISession:
                 except asyncio.CancelledError:
                     # Cancelling the handler task should not leave a Claude CLI
                     # subprocess running in the background.
+                    await asyncio.shield(self.stop())
+                    raise
+                except TimeoutError:
+                    timeout = self.config.stdout_idle_timeout
+                    message = f"Claude CLI produced no stdout for {timeout:g}s"
+                    logger.error("CLI_SESSION: {}", message)
+                    await asyncio.shield(self.stop())
+                    yield {"type": "error", "error": {"message": message}}
+                    yield {"type": "exit", "code": 1, "stderr": message}
+                    return
+                except Exception:
                     await asyncio.shield(self.stop())
                     raise
                 finally:

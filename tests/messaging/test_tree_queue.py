@@ -95,6 +95,46 @@ class TestMessageNode:
         assert node.parent_id == "parent_1"
         assert "child_1" in node.children_ids
 
+    def test_node_from_dict_invalid_state_falls_back_to_error(self):
+        """Corrupted persisted state should not abort tree restoration."""
+        data = {
+            "node_id": "n1",
+            "incoming": {
+                "text": "Hello",
+                "chat_id": "c1",
+                "user_id": "u1",
+                "message_id": "m1",
+                "platform": "test",
+            },
+            "status_message_id": "s1",
+            "state": "not-a-state",
+            "created_at": "2025-01-01T00:00:00",
+        }
+
+        node = MessageNode.from_dict(data)
+
+        assert node.state == MessageState.ERROR
+
+    def test_node_context_round_trips(self):
+        """Test serializing and deserializing node context."""
+        incoming = IncomingMessage(
+            text="Stop",
+            chat_id="1",
+            user_id="2",
+            message_id="3",
+            platform="test",
+        )
+        node = MessageNode(
+            node_id="3",
+            incoming=incoming,
+            status_message_id="s1",
+            context={"cancel_reason": "stop"},
+        )
+
+        restored = MessageNode.from_dict(node.to_dict())
+
+        assert restored.context == {"cancel_reason": "stop"}
+
 
 class TestMessageTree:
     """Test MessageTree class."""

@@ -471,6 +471,12 @@ class FakeCLIManager:
         self.registered: list[tuple[str, str]] = []
         self.removed: list[str] = []
         self.stopped = False
+        self.workspace = ""
+        self.api_url = "http://127.0.0.1:8082/v1"
+        self.auth_token = ""
+        self.prompt_enhancer_model = "claude-haiku-4-5-20251001"
+        self.prompt_enhancer_timeout = 12.0
+        self.prompt_enhancer_max_output_chars = 2000
 
     async def get_or_create_session(
         self, session_id: str | None = None

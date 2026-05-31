@@ -250,16 +250,13 @@ class AppRuntime:
             allowed_dirs=allowed_dirs,
             plans_directory=plans_directory,
             claude_bin=self.settings.claude_cli_bin,
-            auth_token=getattr(self.settings, "anthropic_auth_token", ""),
+            auth_token=self.settings.anthropic_auth_token,
             log_raw_cli_diagnostics=self.settings.log_raw_cli_diagnostics,
             log_messaging_error_details=self.settings.log_messaging_error_details,
-            auto_prompt_enhancer=getattr(self.settings, "auto_prompt_enhancer", True),
-            prompt_enhancer_timeout=getattr(
-                self.settings, "prompt_enhancer_timeout", 12.0
-            ),
-            prompt_enhancer_max_output_chars=getattr(
-                self.settings, "prompt_enhancer_max_output_chars", 2000
-            ),
+            auto_prompt_enhancer=self.settings.auto_prompt_enhancer,
+            prompt_enhancer_model=self.settings.prompt_enhancer_model,
+            prompt_enhancer_timeout=self.settings.prompt_enhancer_timeout,
+            prompt_enhancer_max_output_chars=self.settings.prompt_enhancer_max_output_chars,
         )
 
         session_store = SessionStore(
@@ -267,7 +264,8 @@ class AppRuntime:
             message_log_cap=self.settings.max_message_log_entries_per_chat,
         )
         platform = self.messaging_platform
-        assert platform is not None
+        if platform is None:
+            raise RuntimeError("Messaging platform was not initialized")
         self.message_handler = ClaudeMessageHandler(
             platform=platform,
             cli_manager=self.cli_manager,

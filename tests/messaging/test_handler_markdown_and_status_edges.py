@@ -119,7 +119,8 @@ async def test_update_queue_positions_handles_snapshot_error_and_skips_non_pendi
     await handler.update_queue_positions(tree)
     platform.fire_and_forget.assert_not_called()
 
-    # Normal path: only PENDING nodes get an update.
+    # Normal path: only PENDING nodes get an update, and skipped nodes do not
+    # advance the displayed FIFO position.
     node_pending = MagicMock()
     node_pending.state = MessageState.PENDING
     node_pending.incoming.chat_id = "c"
@@ -129,14 +130,15 @@ async def test_update_queue_positions_handles_snapshot_error_and_skips_non_pendi
     node_done.state = MessageState.COMPLETED
 
     tree.get_queue_snapshot = AsyncMock(return_value=["n1", "n2"])
-    tree.get_node = MagicMock(side_effect=[node_pending, node_done])
+    tree.get_node = MagicMock(side_effect=[node_done, node_pending])
 
     await handler.update_queue_positions(tree)
     assert platform.fire_and_forget.call_count == 1
+    assert "position 1" in platform.queue_edit_message.call_args.args[2]
 
 
 @pytest.mark.asyncio
-async def test_process_node_session_limit_marks_error_and_updates_ui():
+async def test_process_node_session_acquire_error_uses_generic_error_path():
     platform = MagicMock()
     platform.queue_edit_message = AsyncMock()
     platform.fire_and_forget = MagicMock(
@@ -167,6 +169,50 @@ async def test_process_node_session_limit_marks_error_and_updates_ui():
         await handler._process_node("n1", node)
     assert platform.queue_edit_message.await_count >= 1
     fake_tree.update_state.assert_awaited()
+    rendered_updates = " ".join(
+        str(call.args[2]) for call in platform.queue_edit_message.await_args_list
+    )
+    assert "Task Failed" in rendered_updates
+    assert "Session limit reached" not in rendered_updates
+
+
+@pytest.mark.asyncio
+async def test_enhance_inline_reparses_command_before_dispatch(monkeypatch):
+    platform = MagicMock()
+    platform.queue_send_message = AsyncMock(return_value="status_1")
+    platform.queue_edit_message = AsyncMock()
+
+    cli_manager = MagicMock()
+    cli_manager.workspace = "/tmp"
+    cli_manager.api_url = "http://localhost:8082/v1"
+    cli_manager.auth_token = ""
+    cli_manager.prompt_enhancer_model = "custom-enhancer-model"
+    cli_manager.prompt_enhancer_timeout = 12.0
+    cli_manager.prompt_enhancer_max_output_chars = 2000
+
+    async def fake_enhance(*_args, **_kwargs):
+        return "enhanced prompt"
+
+    dispatch = AsyncMock(return_value=True)
+    monkeypatch.setattr("core.prompt_enhancer.enhance_prompt", fake_enhance)
+    monkeypatch.setattr("messaging.handler.dispatch_command", dispatch)
+
+    handler = ClaudeMessageHandler(platform, cli_manager, MagicMock())
+    incoming = IncomingMessage(
+        text="/enhance fix bug",
+        chat_id="c",
+        user_id="u",
+        message_id="n1",
+        platform="telegram",
+    )
+
+    await handler._handle_message_impl(incoming)
+
+    dispatch.assert_awaited_once()
+    dispatch_call = dispatch.await_args
+    assert dispatch_call is not None
+    assert dispatch_call.args[2] != "/enhance"
+    assert incoming.text == "enhanced prompt"
 
 
 @pytest.mark.asyncio

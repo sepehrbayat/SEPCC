@@ -72,7 +72,7 @@ def maybe_update_claude_code(
                 completed.returncode,
                 len(completed.stderr or ""),
             )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
+    except (subprocess.SubprocessError, OSError) as exc:
         outcome = type(exc).__name__
         logger.warning(
             "Claude Code update check failed: command={} error={}",
@@ -107,7 +107,7 @@ def _resolved_path_is_under_npm_prefix(resolved_claude: str, npm_command: str) -
             text=True,
             timeout=15,
         )
-    except FileNotFoundError, subprocess.SubprocessError, OSError:
+    except subprocess.SubprocessError, OSError:
         return False
 
     if completed.returncode != 0:

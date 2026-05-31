@@ -50,7 +50,13 @@ class ModelRouter:
             thinking_enabled = (
                 force_thinking_enabled
                 if force_thinking_enabled is not None
-                else self._settings.resolve_thinking(direct_provider_model)
+                else self._settings.resolve_thinking(
+                    self._direct_model_thinking_name(
+                        claude_model_name,
+                        direct_provider_id,
+                        direct_provider_model,
+                    )
+                )
             )
             logger.debug(
                 "MODEL DIRECT: '{}' -> provider='{}' model='{}' thinking={}",
@@ -104,6 +110,23 @@ class ModelRouter:
         if not provider_model:
             return None, None, None
         return provider_id, provider_model, None
+
+    def _direct_model_thinking_name(
+        self, model_name: str, provider_id: str, provider_model: str
+    ) -> str:
+        """Return the Claude class name to use for direct route thinking policy."""
+        provider_model_ref = f"{provider_id}/{provider_model}"
+        for configured in self._settings.configured_chat_model_refs():
+            if configured.model_ref != provider_model_ref:
+                continue
+            sources = set(configured.sources)
+            if "MODEL_OPUS" in sources:
+                return "claude-opus"
+            if "MODEL_SONNET" in sources:
+                return "claude-sonnet"
+            if "MODEL_HAIKU" in sources:
+                return "claude-haiku"
+        return model_name if model_name.startswith("claude-") else provider_model
 
     def resolve_messages_request(
         self, request: MessagesRequest

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -25,6 +26,17 @@ from core.context.storage import store_context_output
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOKS_DIR = REPO_ROOT / "scripts" / "hooks"
+
+
+def load_shared_hooks_module():
+    spec = importlib.util.spec_from_file_location(
+        "fcc_hook_shared", HOOKS_DIR / "_shared.py"
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_hook(script_name: str, payload: dict[str, object]) -> dict[str, Any]:
@@ -195,6 +207,34 @@ def test_handoff_regeneration_on_stop(tmp_path: Path) -> None:
     assert "SQLite FTS5" in decisions
 
 
+def test_handoff_regeneration_replaces_temp_file_atomically(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    context_dir = tmp_path / ".fcc" / "context"
+    context_dir.mkdir(parents=True)
+    transcript = tmp_path / "session.jsonl"
+    write_transcript(transcript, "Fix the queue race.", "Done.")
+    calls: list[tuple[Path, Path]] = []
+    path_type = type(tmp_path)
+    original_replace = path_type.replace
+
+    def record_replace(self: Path, target: Path) -> Path:
+        calls.append((self, target))
+        return original_replace(self, target)
+
+    monkeypatch.setattr(path_type, "replace", record_replace)
+
+    shared.regenerate_handoff(tmp_path, transcript)
+
+    assert calls
+    temp_path, handoff_path = calls[0]
+    assert temp_path.name == "handoff.tmp"
+    assert handoff_path == context_dir / "handoff.md"
+    assert handoff_path.is_file()
+
+
 def test_precompact_carries_only_must_not_forget(tmp_path: Path) -> None:
     context_dir = tmp_path / ".fcc" / "context"
     context_dir.mkdir(parents=True)
@@ -234,11 +274,129 @@ def test_hook_scripts_emit_valid_json(
     tmp_path: Path,
     script_name: str,
     payload: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "false")
     payload = {"cwd": str(tmp_path), **payload}
     output = run_hook(script_name, payload)
 
     assert output["suppressOutput"] is True
+
+
+def test_compact_lines_unmatched_fence_keeps_remaining_context() -> None:
+    shared = load_shared_hooks_module()
+
+    result = shared.compact_lines("before\n```\nimportant after")
+
+    assert "before" in result
+    assert "important after" in result
+
+
+def test_user_prompt_enhancement_hook_defaults_enabled_and_reports_missing_proxy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    monkeypatch.delenv("AUTO_PROMPT_ENHANCER", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_URL", raising=False)
+    monkeypatch.delenv("FCC_PORT", raising=False)
+
+    context, system_message = shared.prompt_enhancement_outputs("fix bug", tmp_path)
+
+    assert context == ""
+    assert "no proxy URL" in system_message
+
+
+def test_user_prompt_enhancement_hook_emits_additional_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.prompt_enhancer import PromptEnhancementResult
+
+    shared = load_shared_hooks_module()
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "true")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8082")
+    monkeypatch.setenv("PROMPT_ENHANCER_MODEL", "custom-enhancer-model")
+    seen: dict[str, str] = {}
+
+    def fake_enhance(*_args: object, **kwargs: object) -> PromptEnhancementResult:
+        seen["model"] = str(kwargs["model"])
+        return PromptEnhancementResult(
+            original_prompt="fix bug",
+            enhanced_prompt="Fix the authentication bug and run the API regression tests.",
+            status="enhanced",
+        )
+
+    monkeypatch.setattr(shared, "_enhance_prompt_with_core", fake_enhance)
+
+    context = shared.prompt_enhancement_hint("fix bug", tmp_path)
+
+    assert "FCC enhanced prompt" in context
+    assert "authentication bug" in context
+    assert seen["model"] == "custom-enhancer-model"
+
+
+def test_user_prompt_enhancement_hook_emits_visible_system_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from core.prompt_enhancer import PromptEnhancementResult
+
+    shared = load_shared_hooks_module()
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "true")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8082")
+
+    def fake_enhance(*_args: object, **_kwargs: object) -> PromptEnhancementResult:
+        return PromptEnhancementResult(
+            original_prompt="fix bug",
+            enhanced_prompt="Fix the authentication bug and run the API regression tests.",
+            status="enhanced",
+        )
+
+    monkeypatch.setattr(shared, "_enhance_prompt_with_core", fake_enhance)
+
+    context, system_message = shared.prompt_enhancement_outputs("fix bug", tmp_path)
+
+    assert "authentication bug" in context
+    assert system_message.startswith("FCC auto-enhanced prompt:")
+    assert "authentication bug" in system_message
+
+
+def test_user_prompt_enhancement_hook_reports_missing_proxy_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "true")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_URL", raising=False)
+    monkeypatch.delenv("FCC_PORT", raising=False)
+
+    context, system_message = shared.prompt_enhancement_outputs("fix bug", tmp_path)
+
+    assert context == ""
+    assert "no proxy URL" in system_message
+
+
+def test_user_prompt_enhancement_hook_uses_fcc_port_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_URL", raising=False)
+    monkeypatch.setenv("FCC_PORT", "9099")
+
+    assert shared._messages_api_url() == "http://127.0.0.1:9099/v1/messages"
+
+
+def test_user_prompt_enhancement_hook_normalizes_v1_base_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:8082/v1")
+
+    assert shared._messages_api_url() == "http://127.0.0.1:8082/v1/messages"
 
 
 def test_hook_runtime_error_still_emits_json(tmp_path: Path) -> None:
@@ -392,7 +550,11 @@ def test_memsearch_and_claude_mem_defaults_are_mutually_exclusive() -> None:
     assert "claude-mem" not in template_text.lower()
 
 
-def test_user_prompt_submit_emits_routing_hint_for_large_review(tmp_path: Path) -> None:
+def test_user_prompt_submit_emits_routing_hint_for_large_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "false")
     output = run_hook(
         "user_prompt_submit.py",
         {
@@ -407,7 +569,11 @@ def test_user_prompt_submit_emits_routing_hint_for_large_review(tmp_path: Path) 
     assert "large task" in context
 
 
-def test_user_prompt_submit_emits_command_protocol_for_context(tmp_path: Path) -> None:
+def test_user_prompt_submit_emits_command_protocol_for_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "false")
     output = run_hook(
         "user_prompt_submit.py",
         {
@@ -422,7 +588,28 @@ def test_user_prompt_submit_emits_command_protocol_for_context(tmp_path: Path) -
     assert "/compact" in context
 
 
-def test_user_prompt_submit_skips_protocol_for_explicit_command(tmp_path: Path) -> None:
+def test_user_prompt_submit_surfaces_auto_enhancer_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "true")
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_URL", raising=False)
+    monkeypatch.delenv("FCC_PORT", raising=False)
+
+    output = run_hook(
+        "user_prompt_submit.py",
+        {"cwd": str(tmp_path), "prompt": "fix the login bug"},
+    )
+
+    assert "no proxy URL" in output["systemMessage"]
+
+
+def test_user_prompt_submit_skips_protocol_for_explicit_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "false")
     output = run_hook(
         "user_prompt_submit.py",
         {"cwd": str(tmp_path), "prompt": "/context all"},
@@ -460,7 +647,11 @@ def test_statusline_script_outputs_compact_status(tmp_path: Path) -> None:
     assert result.stdout.strip() == f"FCC | Sonnet | {tmp_path.name} | ctx 42%"
 
 
-def test_user_prompt_submit_skips_trivial_prompt(tmp_path: Path) -> None:
+def test_user_prompt_submit_skips_trivial_prompt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTO_PROMPT_ENHANCER", "false")
     output = run_hook(
         "user_prompt_submit.py",
         {"cwd": str(tmp_path), "prompt": "ok thanks"},

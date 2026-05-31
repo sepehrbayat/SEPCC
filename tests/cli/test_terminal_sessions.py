@@ -31,6 +31,10 @@ def _settings() -> Settings:
         fcc_auto_resume_max_age_days=7,
         fcc_auto_resume_project_scoped=True,
         fcc_session_picker_on_ambiguous=True,
+        auto_prompt_enhancer=True,
+        prompt_enhancer_model="claude-haiku-4-5-20251001",
+        prompt_enhancer_timeout=12.0,
+        prompt_enhancer_max_output_chars=2000,
     )
 
 
@@ -516,6 +520,7 @@ def test_bad_explicit_resume_ref_exits(tmp_path: Path) -> None:
         patch("cli.entrypoints._preflight_proxy", return_value=None),
         patch("cli.entrypoints.shutil.which", return_value="claude"),
         patch("cli.entrypoints.maybe_update_claude_code"),
+        patch("cli.session_registry.process_is_running", return_value=False),
         patch("cli.entrypoints.subprocess.Popen") as popen,
         pytest.raises(SystemExit) as exc_info,
     ):
