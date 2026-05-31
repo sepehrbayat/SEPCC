@@ -10,6 +10,7 @@ from _shared import (
     read_text,
     run_hook,
     runtime_contract,
+    startup_command_hint,
 )
 
 
@@ -19,6 +20,9 @@ def main() -> None:
     sections: list[str] = [
         f"## .fcc/context/agent-runtime.md\n{runtime_contract(root)}"
     ]
+    command_hint = startup_command_hint(root)
+    if command_hint:
+        sections.append(f"## Command Protocol\n{command_hint}")
     for rel_path in (
         "CLAUDE.md",
         "CLAUDE.local.md",

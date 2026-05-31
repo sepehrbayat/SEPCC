@@ -121,7 +121,7 @@ If the native Claude transcript is available, FCC launches Claude Code with nati
 
 ## Default Agent Runtime
 
-Bootstrapped projects include `.fcc/context/agent-runtime.md`, `.fcc/plugin-policy.yml`, FCC hooks, and project subagents under `.claude/agents/`. `SessionStart` injects the compact runtime contract, local facts, and current handoff into every main chat. Subagents inherit the same operating rules from their project agent definitions, and `SubagentStop` refreshes handoff state after delegated work. Official Claude Code docs list `SubagentStop` as the stable hook; there is no stable `SubagentStart` — subagent startup awareness is provided through project agent definitions and the supported hooks (`SessionStart`, `UserPromptSubmit`, `Stop`, `PreCompact`, `SubagentStop`).
+Bootstrapped projects include `.fcc/context/agent-runtime.md`, `.fcc/plugin-policy.yml`, FCC hooks, project subagents under `.claude/agents/`, a command-router skill under `.claude/skills/`, and a compact FCC status line. `SessionStart` injects the compact runtime contract, local facts, command-startup advice, and current handoff into every main chat. `UserPromptSubmit` adds short routing and built-in-command hints when the user asks for context management, project setup, review, verification, CLI UI setup, or RTL-language work. Subagents inherit the same operating rules from their project agent definitions, and `SubagentStop` refreshes handoff state after delegated work. Claude Code now documents both `SubagentStart` and `SubagentStop`; FCC's default scaffold only needs `SubagentStop` because startup awareness is provided through project agent definitions and `SessionStart`.
 
 Use:
 
@@ -131,3 +131,17 @@ fcc sessions doctor
 ```
 
 The doctor checks runtime files, supported hooks, duplicate hook owners, MemSearch/Claude-mem mutual exclusion, Token Savior baseline ownership, and Ralph Loop policy. Ralph Loop is optional and should be used only for bounded, test-verifiable loops with explicit completion criteria and a max-iteration cap. FCC never replays raw transcripts; raw output belongs in the SQLite sidecar and compact handoff/memory snippets carry continuity.
+
+## Claude Code Built-ins First
+
+FCC should not reimplement Claude Code's slash-command layer. The command-router skill and hook hints prefer:
+
+- `/init` for `CLAUDE.md` project documentation.
+- `/context all` and `/compact <focus>` for context pressure.
+- `/diff`, `/code-review`, and `/security-review` for local review workflows.
+- `/batch` for large independent worktree units when a git repository is available.
+- `/run` and `/verify` for live app validation.
+- `/doctor`, `/debug`, `/status`, and `fcc context doctor` for diagnostics.
+- `/config`, `/theme`, `/statusline`, `/terminal-setup`, and `/tui fullscreen` for CLI ergonomics.
+
+Prompt enhancement must not rewrite explicit slash commands. Slash commands are control input and should pass through unchanged.

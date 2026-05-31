@@ -30,6 +30,7 @@ class ClaudeCliConfig:
     auth_token: str = ""
     auto_prompt_enhancer: bool = True
     prompt_enhancer_timeout: float = 12.0
+    prompt_enhancer_max_output_chars: int = 2000
 
 
 class CLISession:
@@ -47,6 +48,7 @@ class CLISession:
         log_raw_cli_diagnostics: bool = False,
         auto_prompt_enhancer: bool = True,
         prompt_enhancer_timeout: float = 12.0,
+        prompt_enhancer_max_output_chars: int = 2000,
     ):
         self.config = ClaudeCliConfig(
             workspace_path=os.path.normpath(os.path.abspath(workspace_path)),
@@ -57,6 +59,7 @@ class CLISession:
             auth_token=auth_token,
             auto_prompt_enhancer=auto_prompt_enhancer,
             prompt_enhancer_timeout=prompt_enhancer_timeout,
+            prompt_enhancer_max_output_chars=prompt_enhancer_max_output_chars,
         )
         self.workspace = self.config.workspace_path
         self.api_url = self.config.api_url
@@ -67,6 +70,7 @@ class CLISession:
         self._log_raw_cli_diagnostics = log_raw_cli_diagnostics
         self._enhancer_enabled = auto_prompt_enhancer
         self._enhancer_timeout = prompt_enhancer_timeout
+        self._enhancer_max_output_chars = prompt_enhancer_max_output_chars
         self.process: asyncio.subprocess.Process | None = None
         self.current_session_id: str | None = None
         self._is_busy = False
@@ -118,6 +122,7 @@ class CLISession:
                 api_url=self.api_url.removesuffix("/v1") + "/v1/messages",
                 api_key=self.auth_token.strip(),
                 timeout=self._enhancer_timeout,
+                max_output_chars=self._enhancer_max_output_chars,
             )
         except Exception:
             return prompt

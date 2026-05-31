@@ -341,6 +341,12 @@ textarea {
   padding: 8px 10px;
 }
 
+.field input[type="text"],
+.field textarea {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
 .field textarea {
   min-height: 90px;
   resize: vertical;

@@ -257,6 +257,9 @@ class AppRuntime:
             prompt_enhancer_timeout=getattr(
                 self.settings, "prompt_enhancer_timeout", 12.0
             ),
+            prompt_enhancer_max_output_chars=getattr(
+                self.settings, "prompt_enhancer_max_output_chars", 2000
+            ),
         )
 
         session_store = SessionStore(

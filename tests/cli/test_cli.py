@@ -563,6 +563,39 @@ class TestCLISession:
             assert "ANTHROPIC_AUTH_TOKEN" not in env
 
     @pytest.mark.asyncio
+    async def test_prompt_enhancer_receives_max_output_chars(self, monkeypatch):
+        """Test the configured prompt enhancer output cap is passed to core."""
+        from cli.session import CLISession
+
+        seen: dict[str, int] = {}
+
+        async def fake_enhance(prompt, workspace_path, **kwargs):
+            seen["max_output_chars"] = kwargs["max_output_chars"]
+            return prompt
+
+        monkeypatch.setattr("core.prompt_enhancer.enhance_prompt", fake_enhance)
+
+        session = CLISession(
+            "/tmp",
+            "http://localhost:8082/v1",
+            prompt_enhancer_max_output_chars=123,
+        )
+
+        mock_process = AsyncMock()
+        mock_process.stdout.read.side_effect = [b""]
+        mock_process.stderr.read.return_value = b""
+        mock_process.wait.return_value = 0
+
+        with patch(
+            "asyncio.create_subprocess_exec", new_callable=AsyncMock
+        ) as mock_exec:
+            mock_exec.return_value = mock_process
+            async for _ in session.start_task("test"):
+                pass
+
+        assert seen["max_output_chars"] == 123
+
+    @pytest.mark.asyncio
     async def test_start_task_allowed_dirs(self):
         """Test start_task includes allowed dirs in command."""
         from cli.session import CLISession

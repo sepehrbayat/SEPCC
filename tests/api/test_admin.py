@@ -91,6 +91,15 @@ def test_admin_static_hides_managed_source_label():
     assert "sourceEl.textContent = source" in script
 
 
+def test_admin_static_text_inputs_support_auto_direction():
+    script = Path("api/admin_static/admin.js").read_text(encoding="utf-8")
+    styles = Path("api/admin_static/admin.css").read_text(encoding="utf-8")
+
+    assert 'textarea.dir = "auto"' in script
+    assert 'input.dir = "auto"' in script
+    assert "unicode-bidi: plaintext" in styles
+
+
 def test_admin_config_masks_secrets_and_exposes_manifest(monkeypatch, tmp_path):
     _set_home(monkeypatch, tmp_path)
     _clear_process_config(monkeypatch)

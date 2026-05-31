@@ -41,6 +41,12 @@ Rules:
 """
 
 
+def _should_enhance_prompt(prompt: str) -> bool:
+    """Return whether the prompt is normal user text rather than CLI control input."""
+    stripped = prompt.lstrip()
+    return bool(stripped) and not stripped.startswith("/")
+
+
 def _compact(text: str, *, max_lines: int = 15, max_chars: int = 1200) -> str:
     """Compact text for context injection (same logic as _shared.compact_lines)."""
     out: list[str] = []
@@ -158,6 +164,16 @@ async def enhance_prompt(
     max_output_chars: int = 2000,
 ) -> str:
     """Enhance a user prompt using project context. Returns original on failure."""
+    if not _should_enhance_prompt(prompt):
+        trace_event(
+            stage="enhancement",
+            event="prompt.enhancement.skipped",
+            source="session",
+            reason="control_input",
+            original_chars=len(prompt),
+        )
+        return prompt
+
     try:
         context = _read_project_context(workspace_path)
     except Exception:

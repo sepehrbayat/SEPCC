@@ -106,6 +106,9 @@ def runtime_contract(root: Path, *, max_chars: int = 1500) -> str:
 
 def prompt_routing_hint(prompt: str) -> str:
     """Return a tiny routing hint for prompts that need FCC orchestration."""
+    stripped = prompt.lstrip()
+    if not stripped or stripped.startswith("/"):
+        return ""
     lowered = prompt.lower()
     hints: list[str] = []
     if any(term in lowered for term in _RECALL_TERMS):
@@ -124,9 +127,12 @@ def prompt_routing_hint(prompt: str) -> str:
         hints.append(
             "loop: Ralph Loop only if configured, bounded, and test-verifiable"
         )
-    if not hints:
-        return ""
-    return "FCC routing hint: " + "; ".join(hints[:3]) + "."
+    parts: list[str] = []
+    if hints:
+        parts.append("FCC routing hint: " + "; ".join(hints[:3]) + ".")
+    if command_hint := command_protocol_hint(prompt):
+        parts.append(command_hint)
+    return " ".join(parts)
 
 
 def _fallback_runtime_contract() -> str:
@@ -242,6 +248,101 @@ _LARGE_WORK_TERMS = (
     "tests",
 )
 _LOOP_TERMS = ("ralph", "loop", "iterate", "until passing", "autonomous")
+_STARTUP_TERMS = (
+    "init",
+    "initialize",
+    "onboard",
+    "bootstrap",
+    "project context",
+    "document project",
+)
+_CONTEXT_COMMAND_TERMS = (
+    "context full",
+    "context usage",
+    "too much context",
+    "compact",
+    "token",
+    "memory bloat",
+)
+_REVIEW_COMMAND_TERMS = (
+    "code review",
+    "review diff",
+    "review pr",
+    "security review",
+    "pull request",
+)
+_RUN_COMMAND_TERMS = (
+    "run app",
+    "verify app",
+    "smoke test",
+    "browser qa",
+    "does it work",
+)
+_UI_COMMAND_TERMS = (
+    "theme",
+    "status line",
+    "statusline",
+    "terminal",
+    "fullscreen",
+    "shift+enter",
+    "vim",
+    "output style",
+)
+_RTL_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]")
+
+
+def startup_command_hint(root: Path) -> str:
+    """Return a startup hint when a project is missing expected Claude/FCC context."""
+    hints: list[str] = []
+    if not (root / "CLAUDE.md").is_file():
+        hints.append(
+            "start with /init to create a CLAUDE.md project guide; "
+            "use fcc-bootstrap-context when FCC hooks/skills are desired"
+        )
+    elif not (root / RUNTIME_CONTRACT_FILE).is_file():
+        hints.append(
+            "run fcc-bootstrap-context to install FCC hooks, skills, and handoff files"
+        )
+    if not hints:
+        return ""
+    return "FCC command protocol: " + "; ".join(hints[:2]) + "."
+
+
+def command_protocol_hint(prompt: str) -> str:
+    """Return concise Claude Code built-in command guidance for the active prompt."""
+    stripped = prompt.lstrip()
+    if not stripped or stripped.startswith("/"):
+        return ""
+
+    lowered = prompt.lower()
+    hints: list[str] = []
+    if any(term in lowered for term in _STARTUP_TERMS):
+        hints.append(
+            "/init for CLAUDE.md project documentation; fcc-bootstrap-context for FCC scaffold"
+        )
+    if any(term in lowered for term in _CONTEXT_COMMAND_TERMS):
+        hints.append(
+            "/context all before context surgery; /compact with focus instructions when continuing"
+        )
+    if any(term in lowered for term in _REVIEW_COMMAND_TERMS):
+        hints.append(
+            "/diff to inspect changes; /code-review for correctness; /security-review for security"
+        )
+    if any(term in lowered for term in _RUN_COMMAND_TERMS):
+        hints.append(
+            "/run or /verify when a user-facing app change needs live validation"
+        )
+    if any(term in lowered for term in _UI_COMMAND_TERMS):
+        hints.append(
+            "/config, /theme, /statusline, /terminal-setup, or /tui fullscreen for CLI ergonomics"
+        )
+    if _RTL_RE.search(prompt) is not None:
+        hints.append(
+            "RTL text rendering depends on the terminal or IDE; keep code/tool output LTR"
+        )
+    if not hints:
+        return ""
+    return "FCC command protocol: " + "; ".join(hints[:3]) + "."
 
 
 def parse_transcript_text(transcript_path: Path | str | None) -> str:

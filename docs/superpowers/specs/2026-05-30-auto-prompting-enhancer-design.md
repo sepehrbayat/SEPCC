@@ -1,7 +1,7 @@
 # Auto Prompting Enhancer — Design Spec
 
 **Date:** 2026-05-30
-**Status:** Awaiting approval
+**Status:** Implemented with Claude Code command-safety guardrails
 
 ## Overview
 
@@ -13,6 +13,11 @@ A "Prompt Enhancer" (Auto Prompting Enhancer) that automatically improves user p
 
 **Why:** This is the single universal choke point for all clients (CLI, Discord, Telegram, VS Code, JetBrains). The Claude Code hook system (`UserPromptSubmit`) cannot replace prompts — it only adds `additionalContext` or blocks entirely. The proxy API layer has no workspace context access.
 
+**Alignment note:** This layer is only for normal natural-language prompts. Claude Code
+slash commands are control input, so prompts beginning with `/` must bypass enhancement
+unchanged. Command-aware guidance belongs in Skills and `UserPromptSubmit`
+`additionalContext`, not in prompt rewriting.
+
 ## Design Decisions (Non-Obvious)
 
 - **Fail-open invariant:** `enhance_prompt()` MUST always return a non-empty string. Any exception, timeout, or empty LLM response returns the original prompt unchanged. Enhancement is a convenience, never a blocker.
@@ -20,6 +25,7 @@ A "Prompt Enhancer" (Auto Prompting Enhancer) that automatically improves user p
 - **Stateless:** No caching of context. Files change between calls (especially handoff.md). Read fresh each time.
 - **Self-calling:** The enhancer calls the proxy's own `/v1/messages` endpoint. This avoids duplicating provider logic, auth, or routing.
 - **Single-turn only:** Enhancement is a stateless single-turn call — no conversation, no tool use. 512 max tokens output.
+- **Slash-command bypass:** `/init`, `/compact`, `/context all`, and other slash commands are never rewritten.
 
 ## Data Flow
 

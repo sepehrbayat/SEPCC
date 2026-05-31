@@ -73,7 +73,11 @@ def test_bootstrap_copies_template_and_local_file(tmp_path: Path) -> None:
     assert (tmp_path / ".fcc" / "context" / "agent-runtime.md").is_file()
     assert (tmp_path / ".fcc" / "plugin-policy.yml").is_file()
     assert (tmp_path / ".claude" / "agents" / "fcc-code-reviewer.md").is_file()
+    assert (
+        tmp_path / ".claude" / "skills" / "claude-command-router" / "SKILL.md"
+    ).is_file()
     assert (tmp_path / "scripts" / "hooks" / "session_start.py").is_file()
+    assert (tmp_path / "scripts" / "statusline" / "fcc_statusline.py").is_file()
     assert "CLAUDE.local.md" in (tmp_path / ".gitignore").read_text("utf-8")
     assert report.copied
 
@@ -92,6 +96,9 @@ def test_bootstrap_merges_existing_claude_settings(tmp_path: Path) -> None:
     assert data["permissions"]["allow"] == ["Bash(git status:*)"]
     assert data["env"]["CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE"] == "1"
     assert "SessionStart" in data["hooks"]
+    assert data["statusLine"]["command"].endswith(
+        "scripts/statusline/fcc_statusline.py"
+    )
 
 
 def test_bootstrap_merges_token_savior_into_existing_mcp(tmp_path: Path) -> None:
@@ -398,6 +405,59 @@ def test_user_prompt_submit_emits_routing_hint_for_large_review(tmp_path: Path) 
     assert "FCC routing hint" in context
     assert "review" in context
     assert "large task" in context
+
+
+def test_user_prompt_submit_emits_command_protocol_for_context(tmp_path: Path) -> None:
+    output = run_hook(
+        "user_prompt_submit.py",
+        {
+            "cwd": str(tmp_path),
+            "prompt": "The context is too full; should we compact now?",
+        },
+    )
+
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "FCC command protocol" in context
+    assert "/context all" in context
+    assert "/compact" in context
+
+
+def test_user_prompt_submit_skips_protocol_for_explicit_command(tmp_path: Path) -> None:
+    output = run_hook(
+        "user_prompt_submit.py",
+        {"cwd": str(tmp_path), "prompt": "/context all"},
+    )
+
+    assert "hookSpecificOutput" not in output
+
+
+def test_session_start_suggests_init_when_project_context_missing(
+    tmp_path: Path,
+) -> None:
+    output = run_hook("session_start.py", {"cwd": str(tmp_path)})
+
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "FCC command protocol" in context
+    assert "/init" in context
+    assert "fcc-bootstrap-context" in context
+
+
+def test_statusline_script_outputs_compact_status(tmp_path: Path) -> None:
+    script = REPO_ROOT / "scripts" / "statusline" / "fcc_statusline.py"
+    payload = {
+        "model": {"display_name": "Sonnet"},
+        "workspace": {"current_dir": str(tmp_path)},
+        "context_window": {"used_percentage": 42},
+    }
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == f"FCC | Sonnet | {tmp_path.name} | ctx 42%"
 
 
 def test_user_prompt_submit_skips_trivial_prompt(tmp_path: Path) -> None:

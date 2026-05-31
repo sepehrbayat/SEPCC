@@ -40,6 +40,7 @@ TEMPLATE_REQUIRED_FILES = (
     ".claude/commands/handoff.md",
     ".claude/commands/recall.md",
     ".claude/commands/verify-context.md",
+    ".claude/skills/claude-command-router/SKILL.md",
     ".claude/skills/context-recall/SKILL.md",
     ".claude/skills/handoff-writer/SKILL.md",
     ".claude/skills/route-task/SKILL.md",
@@ -62,6 +63,7 @@ HOOK_SCRIPT_NAMES = (
     "subagent_stop.py",
     "precompact.py",
 )
+STATUSLINE_SCRIPT_NAMES = ("fcc_statusline.py",)
 
 HOOK_OWNER_MARKERS = {
     "FCC context": (
@@ -122,6 +124,12 @@ def bootstrap_context(
     _copy_tree(
         _hook_source_root(),
         root / "scripts" / "hooks",
+        force=force,
+        report=report,
+    )
+    _copy_tree(
+        _statusline_source_root(),
+        root / "scripts" / "statusline",
         force=force,
         report=report,
     )
@@ -304,6 +312,10 @@ def ensure_claude_settings(path: Path, *, force: bool) -> None:
             elif force:
                 _replace_fcc_hooks(current_entries, template_entries)
 
+    for scalar_key in ("statusLine",):
+        if scalar_key in template and (force or scalar_key not in existing):
+            existing[scalar_key] = template[scalar_key]
+
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -323,6 +335,12 @@ def check_template() -> list[str]:
         f"scripts/hooks/{name}"
         for name in HOOK_SCRIPT_NAMES
         if not hook_root.joinpath(name).is_file()
+    )
+    statusline_root = _statusline_source_root()
+    missing.extend(
+        f"scripts/statusline/{name}"
+        for name in STATUSLINE_SCRIPT_NAMES
+        if not statusline_root.joinpath(name).is_file()
     )
     return missing
 
@@ -403,6 +421,13 @@ def _hook_source_root() -> Any:
     if source.is_dir():
         return source
     return resources.files("cli").joinpath("context_hooks")
+
+
+def _statusline_source_root() -> Any:
+    source = Path(__file__).resolve().parents[1] / "scripts" / "statusline"
+    if source.is_dir():
+        return source
+    return resources.files("cli").joinpath("context_statusline")
 
 
 def _copy_tree(

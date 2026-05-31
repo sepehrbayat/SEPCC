@@ -12,6 +12,7 @@ from core.prompt_enhancer import (
     _build_enhancement_request,
     _compact,
     _read_project_context,
+    _should_enhance_prompt,
     enhance_prompt,
 )
 
@@ -74,6 +75,18 @@ class TestBuildEnhancementRequest:
     def test_no_context(self):
         req = _build_enhancement_request("fix bug", "")
         assert "Project Context" not in req["system"]
+
+
+class TestShouldEnhancePrompt:
+    def test_enhances_normal_text(self):
+        assert _should_enhance_prompt("fix the login bug") is True
+
+    def test_skips_slash_commands(self):
+        assert _should_enhance_prompt("/compact preserve auth notes") is False
+        assert _should_enhance_prompt("   /context all") is False
+
+    def test_skips_empty_prompt(self):
+        assert _should_enhance_prompt("   ") is False
 
 
 class TestEnhancePrompt:
@@ -157,3 +170,13 @@ class TestEnhancePrompt:
         monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", failing)
         result = await enhance_prompt("fix bug", "/tmp")
         assert result == "fix bug"
+
+    @pytest.mark.asyncio
+    async def test_slash_command_bypasses_llm_call(self, monkeypatch):
+        async def failing_call(*args, **kwargs):
+            raise AssertionError("slash commands must not be enhanced")
+
+        monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", failing_call)
+        result = await enhance_prompt("/compact keep provider decisions", "/tmp")
+
+        assert result == "/compact keep provider decisions"

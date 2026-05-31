@@ -328,6 +328,7 @@ function inputForField(field) {
   if (field.type === "textarea") {
     const textarea = document.createElement("textarea");
     textarea.value = field.value || "";
+    textarea.dir = "auto";
     return textarea;
   }
 
@@ -342,6 +343,9 @@ function inputForField(field) {
     input.autocomplete = "off";
   } else {
     input.value = field.value || "";
+  }
+  if (input.type === "text") {
+    input.dir = "auto";
   }
   if (field.key.startsWith("MODEL")) {
     input.setAttribute("list", "model-options");
