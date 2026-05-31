@@ -2,7 +2,7 @@
 
 # SEPCC — Unlimited Claude Code, with context that survives
 
-A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
+A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, visible auto prompt enhancement, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -25,6 +25,7 @@ A free and open-source proxy that gives you **unlimited Claude Code** access by 
 - [Providers](#providers)
 - [Connect your editor](#connect-your-editor)
 - [Discord and Telegram bots](#discord-and-telegram-bots)
+- [Auto prompt enhancement](#auto-prompt-enhancement)
 - [Your first prompt](#your-first-prompt)
 - [How it works](#how-it-works)
 - [V2Ray system proxy (port 10808)](#v2ray-system-proxy-port-10808)
@@ -49,7 +50,7 @@ Claude Code is the best AI coding assistant out there. The catch? Anthropic's pr
 
 SEPCC is a **free Claude Code alternative** that sits between Claude Code and the API layer. Claude Code thinks it's talking to Anthropic — but you're routing through DeepSeek, Gemini, OpenRouter, a local Llama, whatever you want. The result is **unlimited Claude Code** sessions. No rate caps. No per-message billing. You own the backend, you set the rules.
 
-The proxy part existed in FCC already. SEPCC adds a full context-hardening layer on top: sessions you can pick back up after a crash, a handoff file that keeps your place between restarts, and a bootstrapper that scaffolds an entire project for long-running **unlimited Claude Code** work in one command. If you're looking for a **Claude Code without limits** setup, this is it.
+The proxy part existed in FCC already. SEPCC adds a full context-hardening layer on top: sessions you can pick back up after a crash, a handoff file that keeps your place between restarts, visible prompt refinement before work begins, and a bootstrapper that scaffolds an entire project for long-running **unlimited Claude Code** work in one command. If you're looking for a **Claude Code without limits** setup, this is it.
 
 Forked from [Ali Khokhar's Free Claude Code](https://github.com/Alishahryar1/free-claude-code). We're grateful for the foundation — all original MIT license terms are preserved.
 
@@ -85,6 +86,14 @@ Chat context is volatile. Claude compacts it. Sessions crash. You lose track of 
 
 It's a few lines, not a transcript. `SessionStart` injects it into every new chat. `SubagentStop` refreshes it after delegated work. Raw terminal and tool output goes to a SQLite sidecar so the handoff stays compact. For anyone doing **unlimited Claude Code** sessions that span days or weeks, this is the difference between a workflow and a mess.
 
+### Visible auto prompt enhancement
+
+SEPCC can refine ordinary user prompts before the model starts working. `AUTO_PROMPT_ENHANCER=true` is enabled by default in the bootstrapped hook environment, and the enhancer uses the same proxy URL you already configured for Claude Code. The default enhancer model is `claude-haiku-4-5-20251001`, configurable with `PROMPT_ENHANCER_MODEL`.
+
+The behavior is intentionally visible. In Claude Code hook launches, `UserPromptSubmit` cannot replace the text you typed, so SEPCC injects the enhanced prompt as additional context and prints a system message showing the refined version that will guide the turn. In Discord and Telegram sessions, SEPCC can rewrite the prompt before launching the CLI and emits a `prompt_enhancement` status event when it changes anything. Slash commands such as `/handoff`, `/recall`, `/verify-context`, and `/enhance` are never auto-rewritten.
+
+If the enhancer cannot run because the proxy URL is missing, the upstream provider returns invalid JSON, or the request times out, SEPCC fails open: your original prompt is used and the visible status tells you why nothing changed. That makes enhancement auditable instead of silent.
+
 ### One command to bootstrap a project
 
 ```bash
@@ -97,6 +106,7 @@ Drops 50+ files into the target project:
 - `.claude/agents/` — four project agents (code reviewer, context auditor, product logic reviewer, researcher)
 - `.claude/skills/` — three Claude Code skills (context-recall, handoff-writer, route-task)
 - `.claude/commands/` — slash commands: `handoff`, `recall`, `verify-context`
+- `.codex/agents/` and `.agents/skills/` — matching Codex project agents and local skills
 - `.fcc/context/` — handoff, decisions, facts, agent runtime contract
 - `.fcc/plugin-policy.yml` — enforces single-owner rules per hook
 - `.mcp.json` — Token Savior config for code retrieval
@@ -142,14 +152,17 @@ Claude Code's official docs document `SubagentStop` as the stable hook for subag
 | Voice notes (Whisper + NIM) | yes | yes |
 | Session resume | no | **yes — SQLite registry + smart fallback** |
 | Context handoff | no | **yes — survives crashes and compaction** |
+| Auto prompt enhancement | no | **yes — visible, fail-open, configurable model** |
 | Project bootstrapper | no | **yes — one command, 50+ files** |
 | Context doctor | no | **yes — validation + auto-repair** |
 | Agent runtime contract | no | **yes — hook-injected every session** |
 | Project subagent definitions | no | **4 specialized agents** |
 | Claude Code project skills | no | **3 project skills** |
+| Codex project scaffold | no | **agents, skills, config, and hooks included** |
 | Slash commands | no | **handoff, recall, verify-context** |
 | Gemini thinking controls | bugged | **fixed** |
 | System proxy support | no | **yes** |
+| Windows launcher | basic | **self-heals duplicate local server ports** |
 
 ---
 
@@ -187,6 +200,8 @@ Open the Admin UI URL. Pick a provider, paste your API key, click **Validate** t
 
 The default model is `deepseek/deepseek-v4-pro`. You'll need a [DeepSeek API key](https://platform.deepseek.com/api_keys). Or choose any of the 17 supported providers listed below — that's the whole point of **unlimited Claude Code**: you pick the backend.
 
+Prompt enhancement also goes through this same local proxy. The default enhancement model is `claude-haiku-4-5-20251001`; change `PROMPT_ENHANCER_MODEL` in your environment if you want the enhancer to use a different model.
+
 ### 4. Bootstrap your project (context features)
 
 ```bash
@@ -195,7 +210,7 @@ fcc-bootstrap-context
 
 Run this once in your project root. It drops 50+ scaffolding files: hook scripts, agent definitions, slash commands, the handoff system, and `.claude/settings.json` with all five lifecycle hooks wired up.
 
-**Without this step, the proxy still works** — routing, session tracking, auto-resume, everything on the network layer. What you won't get is the context layer: the handoff that survives crashes, the agent runtime contract injected into every session, the SubagentStop hook that keeps state after subagents run, the project skills and slash commands.
+**Without this step, the proxy still works** — routing, session tracking, auto-resume, everything on the network layer. What you won't get is the context layer: the handoff that survives crashes, visible prompt enhancement in Claude Code hooks, the agent runtime contract injected into every session, the SubagentStop hook that keeps state after subagents run, the project skills and slash commands.
 
 Run `fcc-bootstrap-context` again later with `--force` to refresh the scaffold, or `fcc context doctor` to check what's in place.
 
@@ -206,6 +221,8 @@ fcc
 ```
 
 `fcc` sets the environment variables Claude Code needs, runs a quick update check, then launches the real `claude` command. Keep `fcc-server` running in another terminal.
+
+When the context scaffold is installed, `fcc` and `fcc-claude` also expose the package root and prompt enhancer settings to the hook scripts. That means ordinary prompts are refined automatically; you only need `/enhance` when you explicitly want to run manual inline enhancement.
 
 ---
 
@@ -290,8 +307,13 @@ Add to `claudeCode.environmentVariables` in settings.json:
 { "name": "ANTHROPIC_BASE_URL", "value": "http://localhost:8082" },
 { "name": "ANTHROPIC_AUTH_TOKEN", "value": "freecc" },
 { "name": "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY", "value": "1" },
-{ "name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "value": "1000000" }
+{ "name": "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "value": "1000000" },
+{ "name": "AUTO_PROMPT_ENHANCER", "value": "true" },
+{ "name": "PROMPT_ENHANCER_MODEL", "value": "claude-haiku-4-5-20251001" },
+{ "name": "PROMPT_ENHANCER_TIMEOUT", "value": "12" }
 ```
+
+If VS Code is launching Claude Code outside `fcc` or `fcc-claude`, also set `FCC_PACKAGE_ROOT` to the SEPCC checkout path used to install the hook scripts. The launcher sets it automatically; direct editor launches need it so prompt enhancement, routing hints, and handoff helpers all import the same shared code.
 
 ### JetBrains
 
@@ -312,6 +334,37 @@ Configure in Admin UI → Messaging. `/stop` cancels, `/clear` resets, `/stats` 
 ### Voice notes
 
 Install with voice extras, configure in Admin UI → Messaging → Voice. Supports local Whisper or NVIDIA NIM.
+
+---
+
+## Auto prompt enhancement
+
+Auto enhancement is designed for the exact moment where a vague prompt would otherwise waste a turn. When `AUTO_PROMPT_ENHANCER=true`, SEPCC sends the user prompt plus lightweight project context through the configured proxy, asks the enhancer model to make it more actionable, then feeds that refined prompt back into the active workflow.
+
+The default settings are:
+
+```bash
+AUTO_PROMPT_ENHANCER=true
+PROMPT_ENHANCER_MODEL=claude-haiku-4-5-20251001
+PROMPT_ENHANCER_TIMEOUT=12
+PROMPT_ENHANCER_MAX_OUTPUT_CHARS=2000
+```
+
+What you should see:
+
+- In Claude Code launched through `fcc` or `fcc-claude`, a visible system message appears when the prompt is enhanced. Claude Code hooks do not let external tools replace the original submitted text, so SEPCC injects the enhanced prompt as additional context and shows you the refined version.
+- In Discord and Telegram sessions, SEPCC rewrites the prompt before launching Claude Code and emits a prompt-enhancement status update so you can tell that the rewritten prompt is the one being used.
+- If no proxy URL is available, the provider returns malformed JSON, or the enhancer times out, SEPCC reports that failure and continues with your original prompt.
+
+Manual enhancement still exists:
+
+```text
+/enhance tighten this into a precise implementation prompt
+```
+
+`/enhance` returns the refined prompt inline so you can inspect or edit it before sending another message. Auto enhancement skips slash commands by design, so command protocols remain deterministic.
+
+When you connect an editor directly instead of using `fcc`, make sure the editor process has the same proxy and enhancer environment variables. For source checkouts, `FCC_PACKAGE_ROOT` should point at the SEPCC repo root so hook scripts can import shared code instead of falling back to a degraded mode.
 
 ---
 
@@ -392,8 +445,10 @@ Hooks maintain state across sessions:
 - `SessionStart` — injects runtime contract + current handoff
 - `SubagentStop` — updates handoff after subagents finish
 - `PreCompact` — preserves critical context before compaction
-- `UserPromptSubmit` — handles handoff recall
+- `UserPromptSubmit` — names active sessions, handles handoff recall, injects routing hints, and surfaces visible prompt enhancement
 - `Stop` — final persistence
+
+Prompt enhancement is just another Anthropic-compatible request through `/v1/messages`. The enhancer accepts both streaming SSE and non-streaming JSON responses, extracts the refined text, and falls back to the original prompt with a visible reason when the proxy URL, upstream response, or timeout prevents enhancement. Compacting logic also keeps unmatched code fences from swallowing all later context, so the handoff stays useful even when a transcript contains broken Markdown.
 
 ---
 
@@ -510,7 +565,7 @@ If you already have files in `%USERPROFILE%\projects` (a common default), the wi
 
 Every launch after the first:
 
-1. The launcher script starts the SEPCC proxy server in a separate window.
+1. The launcher script stops any existing SEPCC `fcc-server` already bound to the configured port, then starts a fresh proxy server in a separate window.
 2. It waits for the server to become healthy (up to 30 seconds).
 3. `pick-project.ps1` reads your saved projects root and shows a numbered list of every project folder inside it.
 4. You pick a project — by number, by [B]rowse dialog, or by [0] typing a path manually. You can also press [R] to reset and pick a new projects root.
@@ -523,6 +578,7 @@ The path chain:
 ```
 Desktop shortcut (launch-fcc-claude.cmd)
   → Resolves repo root from its own location (%~dp0..\..)
+  → Runs stop-fcc-server-on-port.ps1 for the configured FCC port
   → Starts proxy server on port 8082
   → Runs pick-project.ps1:
       → Loads saved projects root from %APPDATA%\SEPCC\projects-root.txt
@@ -613,6 +669,9 @@ SEPCC/
 ├── cli/                   # launcher, session mgmt, bootstrap, doctor
 ├── config/                # settings, provider catalog
 ├── scripts/hooks/         # lifecycle hook scripts
+├── .agents/               # Codex project skills used by this repo
+├── .codex/                # Codex project agents, config, and hooks
+├── .fcc/                  # handoff, decisions, indexes, and local runtime state
 ├── templates/project/     # bootstrap scaffold
 ├── docs/                  # context hardening docs
 └── tests/                 # unit, contract, smoke
@@ -631,6 +690,7 @@ uv run uvicorn server:app --host 0.0.0.0 --port 8082
 ```bash
 uv run ruff format
 uv run ruff check
+uv run ty check
 uv run pytest
 ```
 
@@ -651,7 +711,7 @@ Extend `OpenAIChatTransport` (OpenAI-compatible) or `AnthropicMessagesTransport`
 
 ## Contributing
 
-Keep PRs small and tested. Don't open Docker PRs. Don't open README PRs — open an issue instead. Run `ruff format`, `ruff check`, and `pytest` before pushing.
+Keep PRs small and tested. Don't open Docker PRs. Don't open README PRs — open an issue instead. Run `ruff format`, `ruff check`, `ty check`, and `pytest` before pushing. Do not add `# type: ignore` or `# ty: ignore`; fix the underlying type issue.
 
 Python 3.14 brought back `except X, Y` syntax (final release, not alpha). Keep in mind.
 
