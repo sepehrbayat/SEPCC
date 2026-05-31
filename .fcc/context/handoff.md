@@ -16,9 +16,7 @@
 ## Decisions
 - Persistent memory owner: MemSearch
 - Code retrieval owner: Token Savior
-- `to_dict()` (line 92) never serializes it
-- `from_dict()` (line 118) never restores it
-- The `/enhance` command accesses internal `CLISessionManager` attributes via `getattr` with default fallbacks:
+- UserPromptSubmit hooks may add enhanced prompt context and visible status, but must not rewrite explicit slash commands
 
 ## Next Steps
 - Run /verify-context before major edits.
