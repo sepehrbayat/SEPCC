@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from cli.bootstrap_context import (
+    HOOK_SCRIPT_NAMES,
+    STATUSLINE_SCRIPT_NAMES,
     BootstrapError,
     guard_duplicate_hook_owners,
 )
@@ -22,6 +24,10 @@ AGENT_RELATIVES = (
     Path(".claude") / "agents" / "fcc-code-reviewer.md",
     Path(".claude") / "agents" / "fcc-product-logic-reviewer.md",
     Path(".claude") / "agents" / "fcc-researcher.md",
+)
+HOOK_RELATIVES = tuple(Path("scripts") / "hooks" / name for name in HOOK_SCRIPT_NAMES)
+STATUSLINE_RELATIVES = tuple(
+    Path("scripts") / "statusline" / name for name in STATUSLINE_SCRIPT_NAMES
 )
 SUPPORTED_REQUIRED_HOOKS = (
     "SessionStart",
@@ -37,6 +43,8 @@ class AgentRuntimeDoctorReport:
     runtime_contract_exists: bool
     plugin_policy_exists: bool
     agent_definitions_present: bool
+    hook_scripts_present: bool
+    statusline_script_present: bool
     supported_hooks_configured: bool
     duplicate_hook_owners: bool
     memory_owner_valid: bool
@@ -50,6 +58,8 @@ class AgentRuntimeDoctorReport:
             "runtime_contract_exists": self.runtime_contract_exists,
             "plugin_policy_exists": self.plugin_policy_exists,
             "agent_definitions_present": self.agent_definitions_present,
+            "hook_scripts_present": self.hook_scripts_present,
+            "statusline_script_present": self.statusline_script_present,
             "supported_hooks_configured": self.supported_hooks_configured,
             "duplicate_hook_owners": self.duplicate_hook_owners,
             "memory_owner_valid": self.memory_owner_valid,
@@ -85,6 +95,14 @@ def run_agent_runtime_doctor(
     supported_hooks_configured = _hooks_configured(hooks)
     if not supported_hooks_configured:
         issues.append("Missing one or more FCC supported hooks.")
+    hook_scripts_present = all((root / rel).is_file() for rel in HOOK_RELATIVES)
+    statusline_script_present = all(
+        (root / rel).is_file() for rel in STATUSLINE_RELATIVES
+    )
+    if not hook_scripts_present:
+        issues.append("Missing one or more FCC hook script files.")
+    if not statusline_script_present:
+        issues.append("Missing one or more FCC statusline script files.")
 
     policy_text = _read_text(root / PLUGIN_POLICY_RELATIVE)
     policy_no_comments = _strip_yaml_comments(policy_text)
@@ -98,12 +116,17 @@ def run_agent_runtime_doctor(
     if not ralph_loop_policy_valid:
         issues.append("Ralph Loop policy must require bounded verified iterations.")
 
+    graph_issues = _check_graph_health(root)
+    issues.extend(graph_issues)
+
     report = AgentRuntimeDoctorReport(
         runtime_contract_exists=(root / RUNTIME_CONTRACT_RELATIVE).is_file(),
         plugin_policy_exists=(root / PLUGIN_POLICY_RELATIVE).is_file(),
         agent_definitions_present=all(
             (root / rel).is_file() for rel in AGENT_RELATIVES
         ),
+        hook_scripts_present=hook_scripts_present,
+        statusline_script_present=statusline_script_present,
         supported_hooks_configured=supported_hooks_configured,
         duplicate_hook_owners=duplicate_hook_owners,
         memory_owner_valid=memory_owner_valid,
@@ -115,22 +138,75 @@ def run_agent_runtime_doctor(
     return report.as_dict()
 
 
+def _check_graph_health(root: Path) -> list[str]:
+    """Check knowledge graph health. Returns issues found."""
+    graph_json = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        return [
+            "No knowledge graph found. Run: fcc-bootstrap-context --install-graphify"
+        ]
+    size_mb = graph_json.stat().st_size / (1024 * 1024)
+    if size_mb > 50:
+        return [
+            f"graph.json is {size_mb:.0f}MB — may cause slow loads."
+        ]
+    return []
+
+
 def _copy_missing_runtime_files(project_root: Path) -> list[str]:
     template_root = _template_root()
+    hook_root = _hook_source_root()
+    statusline_root = _statusline_source_root()
     copied: list[str] = []
-    rel_paths = (RUNTIME_CONTRACT_RELATIVE, PLUGIN_POLICY_RELATIVE, *AGENT_RELATIVES)
-    for rel_path in rel_paths:
-        source = _join_resource_path(template_root, rel_path)
-        destination = project_root / rel_path
-        if destination.exists() or not source.is_file():
-            continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(source, Path):
-            shutil.copyfile(source, destination)
-        else:
-            destination.write_bytes(source.read_bytes())
-        copied.append(rel_path.as_posix())
+    for rel_path in (
+        RUNTIME_CONTRACT_RELATIVE,
+        PLUGIN_POLICY_RELATIVE,
+        *AGENT_RELATIVES,
+    ):
+        _copy_missing_resource_file(
+            template_root,
+            rel_path,
+            project_root / rel_path,
+            copied,
+        )
+    for name in HOOK_SCRIPT_NAMES:
+        rel_path = Path("scripts") / "hooks" / name
+        _copy_missing_resource_file(
+            hook_root,
+            Path(name),
+            project_root / rel_path,
+            copied,
+            copied_label=rel_path,
+        )
+    for name in STATUSLINE_SCRIPT_NAMES:
+        rel_path = Path("scripts") / "statusline" / name
+        _copy_missing_resource_file(
+            statusline_root,
+            Path(name),
+            project_root / rel_path,
+            copied,
+            copied_label=rel_path,
+        )
     return copied
+
+
+def _copy_missing_resource_file(
+    source_root: Any,
+    source_rel_path: Path,
+    destination: Path,
+    copied: list[str],
+    *,
+    copied_label: Path | None = None,
+) -> None:
+    source = _join_resource_path(source_root, source_rel_path)
+    if destination.exists() or not source.is_file():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(source, Path):
+        shutil.copyfile(source, destination)
+    else:
+        destination.write_bytes(source.read_bytes())
+    copied.append((copied_label or source_rel_path).as_posix())
 
 
 def _template_root() -> Any:
@@ -138,6 +214,20 @@ def _template_root() -> Any:
     if source.is_dir():
         return source
     return resources.files("cli").joinpath("context_template")
+
+
+def _hook_source_root() -> Any:
+    source = Path(__file__).resolve().parents[1] / "scripts" / "hooks"
+    if source.is_dir():
+        return source
+    return resources.files("cli").joinpath("context_hooks")
+
+
+def _statusline_source_root() -> Any:
+    source = Path(__file__).resolve().parents[1] / "scripts" / "statusline"
+    if source.is_dir():
+        return source
+    return resources.files("cli").joinpath("context_statusline")
 
 
 def _join_resource_path(root: Any, rel_path: Path) -> Any:

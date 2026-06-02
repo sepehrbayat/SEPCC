@@ -14,3 +14,16 @@ routes:
 notes:
   - Keep exact upstream model names in FCC provider config when unknown.
   - Do not add a second default routing proxy.
+graph_rules:
+  - match: "graph:centrality > 0.8"
+    tier: opus
+    reason: "Editing a god node — broad transitive effects require careful reasoning"
+  - match: "graph:community:size > 20"
+    tier: opus
+    reason: "Large architectural domain warrants stronger reasoning"
+  - match: "graph:impact:files > 10"
+    tier: opus
+    reason: "Broad change requires careful planning across many files"
+  - match: "graph:unknown"
+    tier: haiku
+    reason: "No matching entity — exploratory task, start with fast model"

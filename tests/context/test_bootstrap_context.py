@@ -182,6 +182,305 @@ def test_bootstrapped_hook_command_runs_from_nested_cwd(tmp_path: Path) -> None:
     assert str(nested / "scripts" / "hooks") not in result.stderr
 
 
+def test_bootstrap_rewrites_every_fcc_hook_command_to_parent_search(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+
+    data = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    for event_name in ("SessionStart", "UserPromptSubmit", "Stop", "PreCompact"):
+        command = hook_command(data, event_name)
+        assert "Path.cwd().resolve()" in command
+        assert "sys.path.insert" in command
+        assert "runpy.run_path" in command
+    subagent_command = hook_command(data, "SubagentStop")
+    assert "scripts/hooks/subagent_stop.py" in subagent_command
+
+
+def test_bootstrap_parent_search_command_works_when_cwd_has_no_scripts(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+    nested = tmp_path / "nested" / "deeper"
+    nested.mkdir(parents=True)
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    command = hook_command(settings, "UserPromptSubmit")
+    env = {**os.environ, "AUTO_PROMPT_ENHANCER": "false"}
+
+    result = subprocess.run(
+        command,
+        input=json.dumps({"cwd": str(nested), "prompt": "please recall handoff"}),
+        text=True,
+        capture_output=True,
+        shell=True,
+        cwd=nested,
+        env=env,
+        check=True,
+    )
+
+    output = json.loads(result.stdout)
+    assert output["suppressOutput"] is True
+    assert "temp/scripts/hooks" not in result.stderr.replace("\\", "/")
+
+
+def test_bootstrap_replaces_duplicate_legacy_fcc_hooks_without_duplication(
+    tmp_path: Path,
+) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "python scripts/hooks/stop.py",
+                                }
+                            ]
+                        },
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "uv run python scripts/hooks/stop.py",
+                                }
+                            ]
+                        },
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    bootstrap_context(tmp_path)
+
+    data = json.loads(settings.read_text("utf-8"))
+    commands = [
+        command
+        for entry in data["hooks"]["Stop"]
+        for command in json.loads(json.dumps(entry)).get("hooks", [])
+    ]
+    rendered = json.dumps(data["hooks"]["Stop"])
+    assert rendered.count("scripts/hooks/stop.py") == 1
+    assert "Path.cwd().resolve()" in rendered
+    assert len(commands) == 1
+
+
+def test_hook_project_root_uses_nearest_scaffold_parent(tmp_path: Path) -> None:
+    shared = load_shared_hooks_module()
+    bootstrap_context(tmp_path)
+    nested = tmp_path / "temp" / "screenshots"
+    nested.mkdir(parents=True)
+
+    root = shared.project_root({"cwd": str(nested)})
+
+    assert root == tmp_path.resolve()
+
+
+def test_hook_project_root_prefers_claude_project_dir_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    env_root = tmp_path / "env-root"
+    payload_root = tmp_path / "payload-root"
+    bootstrap_context(env_root)
+    bootstrap_context(payload_root)
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(env_root))
+
+    root = shared.project_root({"cwd": str(payload_root)})
+
+    assert root == env_root.resolve()
+
+
+def test_hook_project_root_accepts_file_payload_path(tmp_path: Path) -> None:
+    shared = load_shared_hooks_module()
+    bootstrap_context(tmp_path)
+    file_path = tmp_path / "temp" / "query.sql"
+    file_path.parent.mkdir()
+    file_path.write_text("select 1", encoding="utf-8")
+
+    root = shared.project_root({"cwd": str(file_path)})
+
+    assert root == tmp_path.resolve()
+
+
+def test_hook_project_root_does_not_escape_to_home_fcc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    shared = load_shared_hooks_module()
+    fake_home = tmp_path / "home"
+    work = fake_home / "work" / "unbootstrapped"
+    (fake_home / ".fcc" / "context").mkdir(parents=True)
+    work.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    root = shared.nearest_project_root(work)
+
+    assert root == work.resolve()
+
+
+def test_context_doctor_autofixes_missing_hook_scripts(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    hook_script = tmp_path / "scripts" / "hooks" / "user_prompt_submit.py"
+    statusline_script = tmp_path / "scripts" / "statusline" / "fcc_statusline.py"
+    hook_script.unlink()
+    statusline_script.unlink()
+
+    report = run_agent_runtime_doctor(tmp_path)
+
+    assert hook_script.is_file()
+    assert statusline_script.is_file()
+    assert report["hook_scripts_present"] is True
+    assert report["statusline_script_present"] is True
+    assert "scripts/hooks/user_prompt_submit.py" in report["autofixed"]
+
+
+def test_context_doctor_reports_missing_hook_scripts_without_autofix(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+    (tmp_path / "scripts" / "hooks" / "session_start.py").unlink()
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["hook_scripts_present"] is False
+    assert "Missing one or more FCC hook script files." in report["issues"]
+
+
+def test_context_doctor_reports_missing_statusline_without_autofix(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+    (tmp_path / "scripts" / "statusline" / "fcc_statusline.py").unlink()
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert report["statusline_script_present"] is False
+    assert "Missing one or more FCC statusline script files." in report["issues"]
+
+
+def test_context_doctor_autofixes_all_missing_hook_scripts(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    for hook_script in (tmp_path / "scripts" / "hooks").glob("*.py"):
+        hook_script.unlink()
+
+    report = run_agent_runtime_doctor(tmp_path)
+
+    assert report["hook_scripts_present"] is True
+    for name in (
+        "_shared.py",
+        "session_start.py",
+        "user_prompt_submit.py",
+        "stop.py",
+        "subagent_stop.py",
+        "precompact.py",
+    ):
+        assert (tmp_path / "scripts" / "hooks" / name).is_file()
+        assert f"scripts/hooks/{name}" in report["autofixed"]
+
+
+def test_context_doctor_does_not_overwrite_existing_hook_script(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+    hook_script = tmp_path / "scripts" / "hooks" / "user_prompt_submit.py"
+    original = hook_script.read_text("utf-8")
+    custom = original + "\n# local customization\n"
+    hook_script.write_text(custom, encoding="utf-8")
+
+    report = run_agent_runtime_doctor(tmp_path)
+
+    assert hook_script.read_text("utf-8") == custom
+    assert "scripts/hooks/user_prompt_submit.py" not in report["autofixed"]
+
+
+def test_context_doctor_report_exposes_hook_and_statusline_fields(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+
+    report = run_agent_runtime_doctor(tmp_path, autofix=False)
+
+    assert isinstance(report["hook_scripts_present"], bool)
+    assert isinstance(report["statusline_script_present"], bool)
+    assert report["hook_scripts_present"] is True
+    assert report["statusline_script_present"] is True
+
+
+def test_bootstrap_repair_is_idempotent_for_portable_hooks(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    bootstrap_context(tmp_path)
+
+    data = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    rendered = json.dumps(data["hooks"])
+
+    assert rendered.count("scripts/hooks/session_start.py") == 1
+    assert rendered.count("scripts/hooks/user_prompt_submit.py") == 1
+    assert rendered.count("scripts/hooks/stop.py") == 1
+    assert rendered.count("Path.cwd().resolve()") == 5
+
+
+def test_bootstrap_force_keeps_portable_hooks_single_owner(tmp_path: Path) -> None:
+    bootstrap_context(tmp_path)
+    bootstrap_context(tmp_path, force=True)
+
+    data = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    rendered = json.dumps(data["hooks"])
+
+    assert rendered.count("scripts/hooks/precompact.py") == 1
+    assert rendered.count("scripts/hooks/subagent_stop.py") == 1
+    assert "python scripts/hooks/precompact.py" not in rendered
+
+
+def test_portable_hook_commands_do_not_capture_absolute_project_paths(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+
+    data = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    command = hook_command(data, "UserPromptSubmit")
+
+    assert str(tmp_path) not in command
+    assert "next((x for x in [p,*p.parents]" in command
+    assert "assert root is not None" in command
+
+
+def test_session_start_from_nested_cwd_reads_root_handoff(
+    tmp_path: Path,
+) -> None:
+    bootstrap_context(tmp_path)
+    handoff = tmp_path / ".fcc" / "context" / "handoff.md"
+    handoff.write_text(
+        "# FCC Handoff\n\n## Must Not Forget\n- Root handoff sentinel.\n",
+        encoding="utf-8",
+    )
+    nested = tmp_path / "temp" / "scratch"
+    nested.mkdir(parents=True)
+    settings = json.loads((tmp_path / ".claude" / "settings.json").read_text("utf-8"))
+    env = {**os.environ, "AUTO_PROMPT_ENHANCER": "false"}
+
+    result = subprocess.run(
+        hook_command(settings, "SessionStart"),
+        input=json.dumps({"cwd": str(nested)}),
+        text=True,
+        capture_output=True,
+        shell=True,
+        cwd=nested,
+        env=env,
+        check=True,
+    )
+
+    output = json.loads(result.stdout)
+    context = output["hookSpecificOutput"]["additionalContext"]
+    assert "Root handoff sentinel" in context
+
+
 def test_bootstrap_merges_token_savior_into_existing_mcp(tmp_path: Path) -> None:
     mcp = tmp_path / ".mcp.json"
     mcp.write_text(
@@ -810,7 +1109,10 @@ def test_missing_ralph_plugin_does_not_break_context_doctor(tmp_path: Path) -> N
     report = run_agent_runtime_doctor(tmp_path, autofix=False)
 
     assert report["ralph_loop_policy_valid"] is True
-    assert report["issues"] == []
+    non_graph_issues = [
+        i for i in report["issues"] if "knowledge graph" not in i
+    ]
+    assert non_graph_issues == []
 
 
 def test_route_policy_uses_fcc_aliases_without_deepseek_names() -> None:

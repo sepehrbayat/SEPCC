@@ -386,6 +386,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         help="Also add optional Claude Context MCP for large repositories.",
     )
     parser.add_argument(
+        "--install-graphify",
+        action="store_true",
+        help="Install graphify knowledge graph tooling and build initial graph.",
+    )
+    parser.add_argument(
         "--check-template",
         action="store_true",
         help="Validate that the packaged bootstrap template is complete.",
@@ -411,6 +416,10 @@ def main(argv: Sequence[str] | None = None) -> None:
     except BootstrapError as exc:
         print(f"fcc-bootstrap-context: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
+
+    if args.install_graphify:
+        _install_graphify_tooling(args.target, force=args.force)
+        report.installed.append("Graphify")
 
     print(f"Copied: {len(report.copied)}")
     print(f"Skipped: {len(report.skipped)}")
@@ -692,6 +701,24 @@ def _run_tool_install(command: Sequence[str], label: str) -> None:
         raise BootstrapError(
             f"Could not install {label}: command exited {exc.returncode}."
         ) from exc
+
+
+def _install_graphify_tooling(root: Path, *, force: bool = False) -> None:
+    """Install graphify and build initial knowledge graph."""
+    import subprocess as _sp
+
+    _run_tool_install(
+        ["uv", "tool", "install", "--upgrade", "graphifyy[leiden]"],
+        "Graphify",
+    )
+    _sp.run(
+        ["graphify", ".", "--output", ".fcc/graph/", "--no-viz"],
+        cwd=str(root),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
 
 
 if __name__ == "__main__":
