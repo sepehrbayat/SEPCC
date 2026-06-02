@@ -86,9 +86,13 @@ def run_hook(event_name: str, callback: Callable[[], None]) -> None:
     try:
         callback()
     except Exception as exc:
+        msg = f"FCC {event_name} hook failed: {type(exc).__name__}"
+        exc_str = str(exc)
+        if exc_str and exc_str != type(exc).__name__:
+            msg += f" — {exc_str}"
         emit_hook_json(
             event_name,
-            system_message=f"FCC {event_name} hook failed: {type(exc).__name__}",
+            system_message=msg,
         )
 
 
@@ -101,27 +105,13 @@ def read_text(path: Path) -> str:
 def compact_lines(text: str, *, max_lines: int = 14, max_chars: int = 1800) -> str:
     out: list[str] = []
     used = 0
-    lines = text.splitlines()
-    index = 0
-    while index < len(lines):
-        raw_line = lines[index]
+    in_fence = False
+    for raw_line in text.splitlines():
         line = raw_line.rstrip()
         if line.strip().startswith("```"):
-            closing_index = next(
-                (
-                    candidate
-                    for candidate in range(index + 1, len(lines))
-                    if lines[candidate].strip().startswith("```")
-                ),
-                None,
-            )
-            if closing_index is None:
-                index += 1
-                continue
-            index = closing_index + 1
+            in_fence = not in_fence
             continue
-        if not line.strip():
-            index += 1
+        if in_fence or not line.strip():
             continue
         next_len = len(line) + 1
         if used + next_len > max_chars:
@@ -130,7 +120,6 @@ def compact_lines(text: str, *, max_lines: int = 14, max_chars: int = 1800) -> s
         used += next_len
         if len(out) >= max_lines:
             break
-        index += 1
     return "\n".join(out)
 
 
@@ -231,13 +220,12 @@ def _messages_api_url() -> str:
     if not base:
         api_url = os.environ.get("ANTHROPIC_API_URL", "").strip()
         if api_url:
-            return (
-                api_url.rstrip("/") + "/messages"
-                if api_url.endswith("/v1")
-                else api_url
-            )
+            api_url = api_url.rstrip("/")
+            if api_url.endswith("/v1"):
+                return api_url + "/messages"
+            return api_url + "/v1/messages"
         port = os.environ.get("FCC_PORT", "").strip()
-        if port.isdigit():
+        if port.isdigit() and 1 <= int(port) <= 65535:
             return f"http://127.0.0.1:{port}/v1/messages"
         return ""
     base = base.rstrip("/")
@@ -373,7 +361,7 @@ def session_name_from_prompt(prompt: str) -> str:
     """Return the first 3-4 words of a prompt as a human-readable session name."""
     words: list[str] = []
     for raw in prompt.strip().split():
-        cleaned = "".join(ch for ch in raw if ch.isalnum()).strip()
+        cleaned = "".join(ch for ch in raw if ch.isalnum() or ch in "-_").strip("-_")
         if cleaned:
             words.append(cleaned)
         if len(words) >= 4:
@@ -406,8 +394,12 @@ def name_active_session(root: Path, name: str) -> None:
             )
             conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        import sys
+        print(
+            f"FCC: could not name active session ({type(exc).__name__}: {exc})",
+            file=sys.stderr,
+        )
 
 
 _RECALL_TERMS = (
@@ -490,6 +482,9 @@ _UI_COMMAND_TERMS = (
     "vim",
     "output style",
 )
+# Matches Hebrew, Arabic, Syriac, Thaana, N'Ko, and RTL presentation
+# forms.  Intentionally broad: any RTL character in an otherwise-LTR
+# prompt benefits from a terminal rendering hint.
 _RTL_RE = re.compile(r"[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufeff]")
 
 
@@ -504,6 +499,10 @@ def startup_command_hint(root: Path) -> str:
     elif not (root / RUNTIME_CONTRACT_FILE).is_file():
         hints.append(
             "run fcc-bootstrap-context to install FCC hooks, skills, and handoff files"
+        )
+    elif not (root / ".claude" / "settings.json").is_file():
+        hints.append(
+            "run fcc-bootstrap-context to install FCC hook configuration"
         )
     if not hints:
         return ""

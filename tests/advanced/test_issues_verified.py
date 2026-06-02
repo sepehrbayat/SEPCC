@@ -571,32 +571,17 @@ def test_debugger_issue_h2_cancellation_flushes_queue() -> None:
     )
 
 
-def test_debugger_issue_h3_run_hook_drops_error_message() -> None:
-    """PROVES BUG: run_hook only reports exception type name, not the
-    actual error message. A ValueError('port 99999 is out of range')
-    becomes just 'hook failed: ValueError'."""
+def test_debugger_issue_h3_run_hook_includes_error_message() -> None:
+    """VERIFIES FIX: run_hook reports both exception type name and
+    the actual error message. A ValueError('port 99999 is out of range')
+    becomes 'hook failed: ValueError — port 99999 is out of range'."""
     shared_mod = _load_hook_module("_shared.py")
 
-    # Capture what emit_hook_json receives
-    captured: list[dict] = []
-
-    def capture_emit(event_name: str, *, additional_context: str = "", system_message: str = "") -> None:
-        captured.append({
-            "event": event_name,
-            "context": additional_context,
-            "message": system_message,
-        })
-
-    # Replace emit_hook_json temporarily — but we can't, so just verify
-    # the behavior by reading the code directly
     import inspect
     src = inspect.getsource(shared_mod.run_hook)
-    assert "type(exc).__name__" in src, (
-        "BUG: run_hook only reports exception type, not message."
-    )
-    # Verify the bug position: str(exc) is never used
-    assert "str(exc)" not in src, (
-        "Confirmed: run_hook does not include the exception message string."
+    assert "type(exc).__name__" in src
+    assert "str(exc)" in src, (
+        "run_hook should include the exception message string."
     )
 
 

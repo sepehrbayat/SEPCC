@@ -626,7 +626,7 @@ def test_precompact_carries_only_must_not_forget(tmp_path: Path) -> None:
 
     context = output["hookSpecificOutput"]["additionalContext"]
     assert "billing fixture" in context
-    assert "current-state line" in context
+    assert "current-state line" not in context
 
 
 @pytest.mark.parametrize(
@@ -651,13 +651,13 @@ def test_hook_scripts_emit_valid_json(
     assert output["suppressOutput"] is True
 
 
-def test_compact_lines_unmatched_fence_keeps_remaining_context() -> None:
+def test_compact_lines_unmatched_fence_hides_content_until_close() -> None:
     shared = load_shared_hooks_module()
 
     result = shared.compact_lines("before\n```\nimportant after")
 
     assert "before" in result
-    assert "important after" in result
+    assert "important after" not in result
 
 
 def test_user_prompt_enhancement_hook_defaults_enabled_and_reports_missing_proxy(
