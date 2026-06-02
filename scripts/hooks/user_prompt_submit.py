@@ -15,11 +15,7 @@ from _shared import (
 
 
 def _debugger_pipeline_context(prompt: str, root: object) -> str:
-    """Build the debugger pipeline injection, if a transition is detected.
-
-    Returns an empty string when the debugger module is unavailable
-    (e.g., running outside the SEPCC package environment).
-    """
+    """Build the debugger pipeline injection, if a transition is detected."""
     try:
         from core.debugger.trigger import debugger_pipeline_context as _build
     except ImportError:
@@ -31,6 +27,26 @@ def _debugger_pipeline_context(prompt: str, root: object) -> str:
     return _build(prompt, root)
 
 
+def _graph_task_context(prompt: str, root: object) -> str:
+    """Build graph entity-match injection for this prompt."""
+    try:
+        from core.graph import load_graph
+        from core.graph.context import build_task_injection
+        from core.graph.query import GraphQuery
+    except ImportError:
+        return ""
+    from pathlib import Path
+
+    if not isinstance(root, Path):
+        return ""
+    try:
+        store = load_graph(root)
+        query = GraphQuery(store)
+        return build_task_injection(query, prompt)
+    except Exception:
+        return ""
+
+
 def main() -> None:
     data = read_hook_input()
     prompt = str(data.get("prompt", ""))
@@ -39,12 +55,14 @@ def main() -> None:
     name_active_session(root, name)
     enhancement_context, enhancement_message = prompt_enhancement_outputs(prompt, root)
     pipeline_context = _debugger_pipeline_context(prompt, root)
+    graph_context = _graph_task_context(prompt, root)
     payload = " ".join(
         part
         for part in (
             enhancement_context,
             prompt_routing_hint(prompt),
             pipeline_context,
+            graph_context,
         )
         if part
     )

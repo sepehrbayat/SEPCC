@@ -14,6 +14,26 @@ from _shared import (
 )
 
 
+def _graph_context(root: object) -> str:
+    """Build graph structural summary, if available."""
+    try:
+        from core.graph import load_graph
+        from core.graph.context import build_session_bootstrap
+        from core.graph.query import GraphQuery
+    except ImportError:
+        return ""
+    from pathlib import Path
+
+    if not isinstance(root, Path):
+        return ""
+    try:
+        store = load_graph(root)
+        query = GraphQuery(store)
+        return build_session_bootstrap(query)
+    except Exception:
+        return ""
+
+
 def main() -> None:
     data = read_hook_input()
     root = project_root(data)
@@ -31,6 +51,10 @@ def main() -> None:
         content = compact_lines(read_text(root / rel_path), max_lines=12, max_chars=900)
         if content:
             sections.append(f"## {rel_path}\n{content}")
+
+    graph_context = _graph_context(root)
+    if graph_context:
+        sections.append(graph_context)
 
     payload = "FCC project context:\n" + "\n\n".join(sections)
     emit_hook_json("SessionStart", additional_context=payload)

@@ -14,6 +14,26 @@ from _shared import (
 )
 
 
+def _graph_anchors(root: object) -> str:
+    """Build structural anchors from the knowledge graph."""
+    try:
+        from core.graph import load_graph
+        from core.graph.context import build_structural_anchors
+        from core.graph.query import GraphQuery
+    except ImportError:
+        return ""
+    from pathlib import Path
+
+    if not isinstance(root, Path):
+        return ""
+    try:
+        store = load_graph(root)
+        query = GraphQuery(store)
+        return build_structural_anchors(query)
+    except Exception:
+        return ""
+
+
 def main() -> None:
     data = read_hook_input()
     root = project_root(data)
@@ -35,11 +55,14 @@ def main() -> None:
         max_lines=4,
         max_chars=700,
     )
+    anchors = _graph_anchors(root)
     payload = ""
     if must:
         payload = "FCC must-not-forget facts before compaction:\n" + must
         if continuity:
             payload += "\n\nFCC active continuity:\n" + continuity
+        if anchors:
+            payload += "\n\n" + anchors
     emit_hook_json("PreCompact", additional_context=payload)
 
 
