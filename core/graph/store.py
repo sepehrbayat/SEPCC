@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -170,12 +171,10 @@ class GraphStore:
         self._conn.execute("DELETE FROM entities")
         self._conn.execute("DELETE FROM communities")
         if self._has_fts5:
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
                 self._conn.execute(
                     "INSERT INTO entity_fts(entity_fts) VALUES ('rebuild')"
                 )
-            except sqlite3.OperationalError:
-                pass
         self._conn.commit()
 
     def commit(self) -> None:
@@ -317,8 +316,6 @@ class GraphStore:
         d = dict(row)
         for field in ("intents", "metadata", "central_nodes"):
             if field in d and isinstance(d[field], str):
-                try:
+                with contextlib.suppress(json.JSONDecodeError, TypeError):
                     d[field] = json.loads(d[field])
-                except (json.JSONDecodeError, TypeError):
-                    pass
         return d
