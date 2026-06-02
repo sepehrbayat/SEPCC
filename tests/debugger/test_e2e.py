@@ -18,7 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from core.debugger.report import DebugReport, DebugReportMeta, Finding, FixEntry, FixReport
+from core.debugger.report import (
+    DebugReport,
+    DebugReportMeta,
+    Finding,
+    FixEntry,
+    FixReport,
+)
 from core.debugger.trigger import (
     _capture_pending_task,
     _has_pending_queue,
