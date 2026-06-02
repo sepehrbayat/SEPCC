@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import sqlite3
 import subprocess
@@ -17,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from core._sys import process_is_running, slugify_text
 from core.debugger.report import now_iso
 
 # ---------------------------------------------------------------------------
@@ -538,30 +538,8 @@ def _lockfile_exists(root: Path) -> bool:
 
 
 def _pid_is_alive(pid: int) -> bool:
-    """Return ``True`` when the process identified by *pid* is running.
-
-    NOTE: This is intentionally duplicated from ``cli.session_registry.process_is_running``
-    because hooks run in an environment where the CLI package may not be importable.
-    Keep both in sync manually.
-    """
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        try:
-            completed = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                check=False, capture_output=True, text=True, timeout=5,
-            )
-        except (FileNotFoundError, subprocess.SubprocessError, OSError):
-            return False
-        return str(pid) in completed.stdout
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """Return ``True`` when the process identified by *pid* is running."""
+    return process_is_running(pid)
 
 
 def _release_lock(root: Path) -> None:
@@ -580,21 +558,9 @@ def _release_lock(root: Path) -> None:
 def _slugify(text: str) -> str:
     """Convert *text* into a filesystem-safe slug, max 64 characters.
 
-    NOTE: This is intentionally duplicated from ``cli.session_registry._slugify``
-    because hooks run in an environment where the CLI package may not be importable.
-    Keep both in sync manually.
+    Delegates to the canonical shared implementation.
     """
-    words: list[str] = []
-    for raw in text.lower().replace("_", "-").split():
-        cleaned = "".join(ch for ch in raw if ch.isalnum() or ch == "-").strip("-")
-        if cleaned:
-            words.append(cleaned)
-        if len(words) >= 8:
-            break
-    if not words:
-        return "task"
-    slug = "-".join(words)
-    return slug[:64]
+    return slugify_text(text, max_words=8, fallback="task")
 
 
 # ── Pipeline injection formatting ──────────────────────────────────

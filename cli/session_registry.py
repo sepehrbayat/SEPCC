@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import subprocess
 import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from core._sys import process_is_running as _process_is_running
+from core._sys import slugify_text as _slugify_text
 
 SESSION_DB_RELATIVE = Path(".fcc") / "sessions.sqlite"
 DEFAULT_HANDOFF_RELATIVE = Path(".fcc") / "context" / "handoff.md"
@@ -713,27 +714,11 @@ def _active_session_is_stale(record: TerminalSessionRecord) -> bool:
 
 
 def process_is_running(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        try:
-            completed = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-        except FileNotFoundError, subprocess.SubprocessError, OSError:
-            return False
-        return str(pid) in completed.stdout
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    """Return ``True`` when the process identified by *pid* is running.
+
+    Delegates to the canonical implementation in ``core._sys``.
+    """
+    return _process_is_running(pid)
 
 
 def _project_hooks_configured(project_root: Path) -> bool:
@@ -798,15 +783,8 @@ def _excerpt(text: str, *, limit: int = 240) -> str:
 
 
 def _slugify(text: str | None) -> str | None:
-    if not text:
-        return None
-    words = []
-    for raw in text.lower().replace("_", "-").split():
-        cleaned = "".join(ch for ch in raw if ch.isalnum() or ch == "-").strip("-")
-        if cleaned:
-            words.append(cleaned)
-        if len(words) >= 5:
-            break
-    if not words:
-        return None
-    return "-".join(words)[:64]
+    """Convert *text* into a filesystem-safe slug, max 64 chars.
+
+    Delegates to the canonical implementation in ``core._sys``.
+    """
+    return _slugify_text(text)
