@@ -5,7 +5,8 @@ __pycache__
 !.claude/agents/
 !.claude/agents/**
 !.claude/settings.json
-!.claude/settings.local.json.cursor
+!.claude/settings.local.json
+.cursor
 .pytest_cache
 .ruff_cache
 .serena

@@ -70,6 +70,16 @@ def test_debugger_id_format_specified() -> None:
     assert "PROC-" in content
 
 
+def test_debugger_must_not_have_write_or_edit() -> None:
+    """fcc-agent-debugger is read-only — must NOT declare Write or Edit tools."""
+    content = _read_agent("fcc-agent-debugger.md")
+    fm = _parse_frontmatter(content)
+    tools = fm.get("tools", "")
+    tool_list = [t.strip() for t in tools.split(",")]
+    assert "Write" not in tool_list, "Debugger must not have Write access"
+    assert "Edit" not in tool_list, "Debugger must not have Edit access"
+
+
 # -- Fixer tests ------------------------------------------------------------
 
 
