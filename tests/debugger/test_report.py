@@ -127,7 +127,7 @@ def test_debug_report_empty_risk_downgrade() -> None:
 
 def test_debug_report_risk_level_values() -> None:
     with pytest.raises(ValidationError):
-        DebugReportMeta(risk_level="critical")  # type: ignore[arg-type]
+        DebugReportMeta.model_validate({"risk_level": "critical"})
 
 
 def test_debug_report_file_roundtrip(tmp_path: Path) -> None:
