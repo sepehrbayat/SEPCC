@@ -106,7 +106,9 @@ def regenerate_handoff(project_root: Path, transcript_path: Path | str | None) -
         decisions_text=decisions_text,
         structural_context=structural_context,
     )
-    handoff_path.write_text(new_handoff, encoding="utf-8")
+    tmp_path = handoff_path.with_suffix(".tmp")
+    tmp_path.write_text(new_handoff, encoding="utf-8")
+    tmp_path.replace(handoff_path)
 
     decision_updates = extract_decisions(transcript_text, max_items=5)
     if decision_updates:

@@ -107,6 +107,19 @@ def parse_transcript_text(transcript_path: Path | str | None) -> str:
     return "\n".join(entries[-10:])
 
 
+_BOILERPLATE_PREFIXES = (
+    "assistant: i'll inspect",
+    "assistant: i'll start",
+    "assistant: let me",
+    "assistant: first, let me",
+    "assistant: now i'll",
+    "assistant: i need to",
+    "assistant: i can see",
+    "assistant: i see",
+    "assistant: let's",
+)
+
+
 def summarize_transcript(text: str, *, max_items: int = 5) -> list[str]:
     """Summarize transcript text deterministically without an LLM call."""
     if not text.strip():
@@ -114,7 +127,7 @@ def summarize_transcript(text: str, *, max_items: int = 5) -> list[str]:
     meaningful = [
         line
         for line in text.splitlines()
-        if not line.lower().startswith("assistant: i'll inspect")
+        if not line.lower().startswith(_BOILERPLATE_PREFIXES)
     ]
     return bulletize(meaningful[-max_items:], max_items=max_items)
 
@@ -143,7 +156,8 @@ def _extract_text(obj: Any) -> str:
         return ""
 
     block_type = obj.get("type")
-    if block_type not in {None, "text", "message", "user", "assistant"}:
+    has_role = "role" in obj
+    if not has_role and block_type not in {"text", "message", "user", "assistant"}:
         return ""
 
     parts: list[str] = []
