@@ -9,13 +9,10 @@ import pytest
 
 from core.graph.loader import (
     GraphLoadError,
-    _normalize_edge,
-    _normalize_node,
     graph_path,
     graphify_available,
     load_graph,
 )
-from core.graph.store import GraphStore
 
 
 def test_graph_path(tmp_path: Path) -> None:

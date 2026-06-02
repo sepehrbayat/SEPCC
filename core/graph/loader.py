@@ -24,7 +24,7 @@ def graphify_available() -> bool:
     return shutil.which("graphify") is not None
 
 
-def load_graph(root: Path, *, timeout: float = 5.0) -> GraphStore:
+def load_graph(root: Path) -> GraphStore:
     """Load graphify's graph.json into a fresh GraphStore.
 
     Raises GraphLoadError on missing, malformed, or invalid data.
@@ -63,17 +63,23 @@ def load_graph(root: Path, *, timeout: float = 5.0) -> GraphStore:
     store.clear()
 
     for node in nodes:
+        if not isinstance(node, dict):
+            raise GraphLoadError(f"graph.json 'nodes' element must be a dict, got: {type(node).__name__}")
         _validate_node(node)
         entity = _normalize_node(node)
         store.insert_entity(entity)
 
     for edge in edges:
+        if not isinstance(edge, dict):
+            raise GraphLoadError(f"graph.json 'edges' element must be a dict, got: {type(edge).__name__}")
         _validate_edge(edge)
         rel = _normalize_edge(edge)
         store.insert_relation(rel)
 
     if isinstance(communities, list):
         for comm in communities:
+            if not isinstance(comm, dict):
+                raise GraphLoadError(f"graph.json 'communities' element must be a dict, got: {type(comm).__name__}")
             _validate_community(comm)
             store.insert_community(comm)
 
@@ -91,8 +97,6 @@ def load_graph(root: Path, *, timeout: float = 5.0) -> GraphStore:
 def _validate_node(node: dict[str, Any]) -> None:
     if not isinstance(node.get("id"), str) or not node["id"].strip():
         raise GraphLoadError(f"Node missing valid 'id': {node}")
-    if not isinstance(node.get("name"), str):
-        node["name"] = node["id"]
 
 
 def _validate_edge(edge: dict[str, Any]) -> None:
