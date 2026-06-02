@@ -24,3 +24,4 @@ llama_cache
 server.*
 CLAUDE.local.md
 .fcc/debugger/
+.fcc/sessions.sqlite
