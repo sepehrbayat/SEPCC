@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 from _shared import (
     HANDOFF_FILE,
     compact_lines,
@@ -10,6 +12,7 @@ from _shared import (
     project_root,
     read_hook_input,
     read_text,
+    regenerate_handoff,
     run_hook,
 )
 
@@ -40,6 +43,12 @@ def _graph_anchors(root: object) -> str:
 def main() -> None:
     data = read_hook_input()
     root = project_root(data)
+
+    # Regenerate handoff before reading — ensures PreCompact captures
+    # the latest state even when Stop hasn't fired yet.
+    with contextlib.suppress(Exception):
+        regenerate_handoff(root, None)
+
     handoff = read_text(root / HANDOFF_FILE)
     must = compact_lines(
         extract_section(handoff, "Must Not Forget"),

@@ -197,6 +197,8 @@ def guard_project_hook_owners(root: Path) -> None:
     settings_paths = [
         root / ".claude" / "settings.json",
         root / ".claude" / "settings.local.json",
+        Path.home() / ".claude" / "settings.json",
+        Path.home() / ".claude" / "settings.local.json",
     ]
     for settings_path in settings_paths:
         guard_duplicate_hook_owners(settings_path)
