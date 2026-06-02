@@ -26,12 +26,18 @@ def _graph_context(root: object) -> str:
 
     if not isinstance(root, Path):
         return ""
+    graph_json = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        return ""  # No graph installed — normal, not an error
     try:
         store = load_graph(root)
         query = GraphQuery(store)
         return build_session_bootstrap(query)
-    except Exception:
-        return ""
+    except Exception as exc:
+        return (
+            f"## Graph Context\nGraph context unavailable ({type(exc).__name__}). "
+            "Rebuild with: fcc-bootstrap-context --install-graphify"
+        )
 
 
 def main() -> None:

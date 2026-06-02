@@ -6,13 +6,10 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from unittest import mock
-
-import pytest
 
 from core.debugger.trigger import (
-    PENDING_DIR,
     LOCKFILE,
+    PENDING_DIR,
     _capture_pending_task,
     _capture_test_results,
     _commit_range,
@@ -33,7 +30,6 @@ from core.debugger.trigger import (
     detect_task_transition,
     get_last_completed_task,
 )
-
 
 # ===================================================================
 # _prompt_to_task_name
@@ -81,9 +77,7 @@ def test_tasks_are_same_continuation() -> None:
 
 
 def test_tasks_are_same_different() -> None:
-    assert (
-        _tasks_are_same("fix-login-bug", "refactor-database-schema") is False
-    )
+    assert _tasks_are_same("fix-login-bug", "refactor-database-schema") is False
 
 
 def test_tasks_are_same_no_overlap() -> None:
@@ -172,7 +166,14 @@ def test_query_last_session_with_data(tmp_path: Path) -> None:
     )
     conn.execute(
         "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)",
-        ("s1", "fix-login-bug", "Fix Login Bug", "resumable", "/tmp/t.jsonl", "2025-01-01T00:00:00Z"),
+        (
+            "s1",
+            "fix-login-bug",
+            "Fix Login Bug",
+            "resumable",
+            "/tmp/t.jsonl",
+            "2025-01-01T00:00:00Z",
+        ),
     )
     conn.commit()
     conn.close()
@@ -334,11 +335,13 @@ def test_slugify_max_length() -> None:
 def test_format_injection_includes_task_name(tmp_path: Path) -> None:
     pending = tmp_path / "pending.json"
     pending.write_text(
-        json.dumps({
-            "task_name": "fix-login-bug",
-            "files_changed": ["login.py"],
-            "commit_range": "abc..def",
-        }),
+        json.dumps(
+            {
+                "task_name": "fix-login-bug",
+                "files_changed": ["login.py"],
+                "commit_range": "abc..def",
+            }
+        ),
         encoding="utf-8",
     )
     result = _format_pipeline_injection(pending)
@@ -349,16 +352,18 @@ def test_format_injection_includes_task_name(tmp_path: Path) -> None:
 def test_format_injection_with_test_failures(tmp_path: Path) -> None:
     pending = tmp_path / "pending.json"
     pending.write_text(
-        json.dumps({
-            "task_name": "refactor-db",
-            "files_changed": ["db.py"],
-            "test_results": {
-                "passed": 3,
-                "failed": 1,
-                "total": 4,
-                "failures": ["FAILED tests/test_db.py::test_query"],
-            },
-        }),
+        json.dumps(
+            {
+                "task_name": "refactor-db",
+                "files_changed": ["db.py"],
+                "test_results": {
+                    "passed": 3,
+                    "failed": 1,
+                    "total": 4,
+                    "failures": ["FAILED tests/test_db.py::test_query"],
+                },
+            }
+        ),
         encoding="utf-8",
     )
     result = _format_pipeline_injection(pending)
@@ -370,10 +375,12 @@ def test_format_injection_truncates_long_file_list(tmp_path: Path) -> None:
     files = [f"file_{i}.py" for i in range(10)]
     pending = tmp_path / "pending.json"
     pending.write_text(
-        json.dumps({
-            "task_name": "big-refactor",
-            "files_changed": files,
-        }),
+        json.dumps(
+            {
+                "task_name": "big-refactor",
+                "files_changed": files,
+            }
+        ),
         encoding="utf-8",
     )
     result = _format_pipeline_injection(pending)
@@ -384,8 +391,9 @@ def test_format_injection_truncates_long_file_list(tmp_path: Path) -> None:
 
 
 def test_format_injection_missing_file(tmp_path: Path) -> None:
+    """Corrupt or missing pending files produce a diagnostic, not empty string."""
     result = _format_pipeline_injection(tmp_path / "nonexistent.json")
-    assert result == ""
+    assert "Manual review recommended" in result
 
 
 # ===================================================================

@@ -26,12 +26,15 @@ def _graph_anchors(root: object) -> str:
 
     if not isinstance(root, Path):
         return ""
+    graph_json = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        return ""  # No graph installed — normal, not an error
     try:
         store = load_graph(root)
         query = GraphQuery(store)
         return build_structural_anchors(query)
-    except Exception:
-        return ""
+    except Exception as exc:
+        return f"## Structural Anchors\n- Graph unavailable ({type(exc).__name__})."
 
 
 def main() -> None:

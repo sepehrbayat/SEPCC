@@ -60,38 +60,42 @@ def load_graph(root: Path) -> GraphStore:
         raise GraphLoadError("graph.json 'edges' must be a list")
 
     store = GraphStore(root)
-    store.clear()
+    try:
+        store.clear()
 
-    for node in nodes:
-        if not isinstance(node, dict):
-            raise GraphLoadError(f"graph.json 'nodes' element must be a dict, got: {type(node).__name__}")
-        _validate_node(node)
-        entity = _normalize_node(node)
-        store.insert_entity(entity)
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise GraphLoadError(f"graph.json 'nodes' element must be a dict, got: {type(node).__name__}")
+            _validate_node(node)
+            entity = _normalize_node(node)
+            store.insert_entity(entity)
 
-    for edge in edges:
-        if not isinstance(edge, dict):
-            raise GraphLoadError(f"graph.json 'edges' element must be a dict, got: {type(edge).__name__}")
-        _validate_edge(edge)
-        rel = _normalize_edge(edge)
-        store.insert_relation(rel)
+        for edge in edges:
+            if not isinstance(edge, dict):
+                raise GraphLoadError(f"graph.json 'edges' element must be a dict, got: {type(edge).__name__}")
+            _validate_edge(edge)
+            rel = _normalize_edge(edge)
+            store.insert_relation(rel)
 
-    if isinstance(communities, list):
-        for comm in communities:
-            if not isinstance(comm, dict):
-                raise GraphLoadError(f"graph.json 'communities' element must be a dict, got: {type(comm).__name__}")
-            _validate_community(comm)
-            store.insert_community(comm)
+        if isinstance(communities, list):
+            for comm in communities:
+                if not isinstance(comm, dict):
+                    raise GraphLoadError(f"graph.json 'communities' element must be a dict, got: {type(comm).__name__}")
+                _validate_community(comm)
+                store.insert_community(comm)
 
-    store.commit()
+        store.commit()
 
-    # Track version: use mtime as version string
-    mtime = path.stat().st_mtime
-    from datetime import UTC, datetime
-    version = datetime.fromtimestamp(mtime, UTC).isoformat()
-    store.set_version(version)
+        # Track version: use mtime as version string
+        mtime = path.stat().st_mtime
+        from datetime import UTC, datetime
+        version = datetime.fromtimestamp(mtime, UTC).isoformat()
+        store.set_version(version)
 
-    return store
+        return store
+    except Exception:
+        store.close()
+        raise
 
 
 def _validate_node(node: dict[str, Any]) -> None:

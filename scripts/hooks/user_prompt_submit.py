@@ -39,12 +39,15 @@ def _graph_task_context(prompt: str, root: object) -> str:
 
     if not isinstance(root, Path):
         return ""
+    graph_json = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        return ""  # No graph installed — normal, not an error
     try:
         store = load_graph(root)
         query = GraphQuery(store)
         return build_task_injection(query, prompt)
-    except Exception:
-        return ""
+    except Exception as exc:
+        return f"[Graph Context] Graph unavailable ({type(exc).__name__})."
 
 
 def main() -> None:

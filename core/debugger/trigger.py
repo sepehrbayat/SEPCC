@@ -7,6 +7,7 @@ relative to *root*.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -63,9 +64,8 @@ def debugger_pipeline_context(prompt: str, root: Path) -> str:
         return ""
 
     pending_path = detect_task_transition(root, prompt)
-    if pending_path is None:
-        if _has_pending_queue(root):
-            pending_path = _pop_next_pending(root)
+    if pending_path is None and _has_pending_queue(root):
+        pending_path = _pop_next_pending(root)
     if pending_path is None:
         return ""
     return _format_pipeline_injection(pending_path)
@@ -128,13 +128,13 @@ def _prompt_to_task_name(prompt: str) -> str:
 
 
 def _tasks_are_same(new_name: str, old_name: str) -> bool:
-    """Return ``True`` when >= 40% of significant terms overlap."""
-    new_terms = {
-        t.lower() for t in re.split(r"[^a-zA-Z0-9]+", new_name) if len(t) > 2
-    }
-    old_terms = {
-        t.lower() for t in re.split(r"[^a-zA-Z0-9]+", old_name) if len(t) > 2
-    }
+    """Return ``True`` when >= 40% of significant terms overlap.
+
+    Normalises both names to lowercase alphanumeric tokens (>2 chars)
+    then computes Jaccard-like overlap ratio.
+    """
+    new_terms = _tokenize(new_name)
+    old_terms = _tokenize(old_name)
 
     if not new_terms or not old_terms:
         return False
@@ -144,6 +144,16 @@ def _tasks_are_same(new_name: str, old_name: str) -> bool:
     if smaller == 0:
         return False
     return len(intersection) / smaller >= 0.4
+
+
+def _tokenize(name: str) -> set[str]:
+    """Split *name* into significant (>2 char) lowercase alphanumeric tokens.
+
+    Splits on any non-alphanumeric character, so it works regardless of
+    which slug format (hyphens, underscores, spaces) a downstream caller
+    happens to use.
+    """
+    return {t.lower() for t in re.split(r"[^a-zA-Z0-9]+", name) if len(t) > 2}
 
 
 # ===================================================================
@@ -176,14 +186,13 @@ def get_last_completed_task(root: Path) -> dict[str, Any] | None:
         return None
 
     commit_range = _commit_range(root)
-    test_results = _capture_test_results(root)
 
     return {
         "task_name": task_name,
         "transcript_path": transcript,
         "files_changed": files_changed,
         "commit_range": commit_range,
-        "test_results": test_results,
+        "test_results": None,  # Deferred: debugger subagent runs tests
         "captured_at": now_iso(),
     }
 
@@ -200,6 +209,7 @@ def _query_last_session(root: Path) -> dict[str, Any] | None:
     if not db_path.is_file():
         return None
 
+    conn = None
     try:
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
@@ -214,9 +224,12 @@ def _query_last_session(root: Path) -> dict[str, Any] | None:
             LIMIT 1
             """
         ).fetchone()
-        conn.close()
     except (sqlite3.DatabaseError, sqlite3.OperationalError, OSError):
         return None
+    finally:
+        if conn is not None:
+            with contextlib.suppress(OSError):
+                conn.close()
 
     if row is None:
         return None
@@ -237,7 +250,11 @@ def _query_last_session(root: Path) -> dict[str, Any] | None:
 
 
 def _transcript_from_handoff(root: Path) -> str | None:
-    """Scan ``.fcc/context/handoff.md`` for a ``.jsonl`` transcript path."""
+    """Scan ``.fcc/context/handoff.md`` for a ``.jsonl`` transcript path.
+
+    Only matches paths that look like Claude Code transcript files:
+    under ``.claude/projects/`` or containing hex session-ID segments.
+    """
     handoff_path = root / ".fcc" / "context" / "handoff.md"
     if not handoff_path.is_file():
         return None
@@ -247,9 +264,20 @@ def _transcript_from_handoff(root: Path) -> str | None:
     except OSError:
         return None
 
-    match = re.search(r"(\S+\.jsonl)", text)
+    # Prefer paths that live under .claude/projects/ (Claude Code transcripts)
+    match = re.search(
+        r"(\S*\.claude[/\\]projects[/\\]\S+\.jsonl)", text
+    )
     if match:
         return match.group(1)
+
+    # Fallback: long-hex-segment pattern (typical session-ID filenames)
+    match = re.search(
+        r"(\S*[0-9a-f]{12,}\S*\.jsonl)", text
+    )
+    if match:
+        return match.group(1)
+
     return None
 
 
@@ -269,13 +297,11 @@ def _recently_changed_files(root: Path) -> list[str]:
             timeout=10,
             cwd=str(root),
         )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+    except FileNotFoundError, subprocess.SubprocessError, OSError:
         return []
 
     if completed.returncode == 0 and completed.stdout.strip():
-        return [
-            f for f in completed.stdout.strip().splitlines() if f.strip()
-        ]
+        return [f for f in completed.stdout.strip().splitlines() if f.strip()]
 
     # Fallback: git diff --name-only HEAD
     try:
@@ -286,13 +312,11 @@ def _recently_changed_files(root: Path) -> list[str]:
             timeout=10,
             cwd=str(root),
         )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+    except FileNotFoundError, subprocess.SubprocessError, OSError:
         return []
 
     if fallback.returncode == 0 and fallback.stdout.strip():
-        return [
-            f for f in fallback.stdout.strip().splitlines() if f.strip()
-        ]
+        return [f for f in fallback.stdout.strip().splitlines() if f.strip()]
 
     return []
 
@@ -308,7 +332,7 @@ def _commit_range(root: Path) -> str:
             timeout=10,
             cwd=str(root),
         )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+    except FileNotFoundError, subprocess.SubprocessError, OSError:
         return ""
 
     if completed.returncode != 0:
@@ -341,7 +365,7 @@ def _capture_test_results(root: Path) -> dict[str, Any] | None:
             timeout=30,
             cwd=str(root),
         )
-    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+    except FileNotFoundError, subprocess.SubprocessError, OSError:
         return None
 
     output = completed.stdout.strip()
@@ -367,10 +391,11 @@ def _capture_test_results(root: Path) -> dict[str, Any] | None:
 
     # Capture failure names from the output lines
     # pytest -q prints "FAILED tests/test_file.py::test_name" lines
-    failure_names: list[str] = []
-    for line in output.splitlines():
-        if line.strip().startswith("FAILED "):
-            failure_names.append(line.strip())
+    failure_names = [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip().startswith("FAILED ")
+    ]
 
     return {
         "passed": passed,
@@ -397,7 +422,9 @@ def _capture_pending_task(root: Path, task: dict[str, Any]) -> Path:
     filename = f"{timestamp}-{slug}.json"
     filepath = pending / filename
 
-    filepath.write_text(json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8")
+    filepath.write_text(
+        json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return filepath
 
 
@@ -425,9 +452,7 @@ def _pop_next_pending(root: Path) -> Path | None:
     if not pending.is_dir():
         return None
 
-    json_files = sorted(
-        pending.glob("*.json"), key=lambda p: p.stat().st_mtime
-    )
+    json_files = sorted(pending.glob("*.json"), key=lambda p: p.stat().st_mtime)
     if not json_files:
         return None
 
@@ -438,10 +463,8 @@ def _pop_next_pending(root: Path) -> Path | None:
         if mtime < stale_threshold:
             failed_dir = root / FAILED_DIR
             failed_dir.mkdir(parents=True, exist_ok=True)
-            try:
+            with contextlib.suppress(OSError):
                 filepath.rename(failed_dir / filepath.name)
-            except OSError:
-                pass
             continue
         return filepath
 
@@ -458,10 +481,16 @@ def _flush_all_pending_to_skipped(root: Path) -> None:
     skipped.mkdir(parents=True, exist_ok=True)
 
     for json_file in pending.glob("*.json"):
-        try:
+        with contextlib.suppress(OSError):
             json_file.rename(skipped / json_file.name)
-        except OSError:
-            pass
+
+
+def _move_to_failed(pending_path: Path) -> None:
+    """Move a corrupt or unprocessable pending file to ``failed/``."""
+    failed_dir = pending_path.parent.parent / "failed"
+    failed_dir.mkdir(parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        pending_path.rename(failed_dir / pending_path.name)
 
 
 # ===================================================================
@@ -484,7 +513,7 @@ def _lockfile_exists(root: Path) -> bool:
     try:
         raw = lock_path.read_text(encoding="utf-8").strip()
         pid = int(raw)
-    except (ValueError, OSError):
+    except ValueError, OSError:
         # Corrupted lock -- clean it up
         _release_lock(root)
         return False
@@ -509,29 +538,29 @@ def _lockfile_exists(root: Path) -> bool:
 
 
 def _pid_is_alive(pid: int) -> bool:
-    """Return ``True`` when the process identified by *pid* is running."""
+    """Return ``True`` when the process identified by *pid* is running.
+
+    NOTE: This is intentionally duplicated from ``cli.session_registry.process_is_running``
+    because hooks run in an environment where the CLI package may not be importable.
+    Keep both in sync manually.
+    """
     if pid <= 0:
         return False
-
     if os.name == "nt":
         try:
             completed = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
+                check=False, capture_output=True, text=True, timeout=5,
             )
         except (FileNotFoundError, subprocess.SubprocessError, OSError):
             return False
         return str(pid) in completed.stdout
-
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True  # process exists but we lack permission
+        return True
     return True
 
 
@@ -539,10 +568,8 @@ def _release_lock(root: Path) -> None:
     """Delete the lockfile if it exists."""
     lock_path = root / LOCKFILE
     if lock_path.exists():
-        try:
+        with contextlib.suppress(OSError):
             lock_path.unlink()
-        except OSError:
-            pass
 
 
 # ===================================================================
@@ -551,7 +578,12 @@ def _release_lock(root: Path) -> None:
 
 
 def _slugify(text: str) -> str:
-    """Convert *text* into a filesystem-safe slug, max 64 characters."""
+    """Convert *text* into a filesystem-safe slug, max 64 characters.
+
+    NOTE: This is intentionally duplicated from ``cli.session_registry._slugify``
+    because hooks run in an environment where the CLI package may not be importable.
+    Keep both in sync manually.
+    """
     words: list[str] = []
     for raw in text.lower().replace("_", "-").split():
         cleaned = "".join(ch for ch in raw if ch.isalnum() or ch == "-").strip("-")
@@ -559,17 +591,15 @@ def _slugify(text: str) -> str:
             words.append(cleaned)
         if len(words) >= 8:
             break
-
     if not words:
         return "task"
-
     slug = "-".join(words)
     return slug[:64]
 
 
-# ===================================================================
-# Pipeline injection formatting
-# ===================================================================
+# ── Pipeline injection formatting ──────────────────────────────────
+
+MAX_INJECTION_CHARS = 1500
 
 
 def _format_pipeline_injection(pending_path: Path) -> str:
@@ -578,7 +608,12 @@ def _format_pipeline_injection(pending_path: Path) -> str:
     try:
         data = json.loads(pending_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return ""
+        _move_to_failed(pending_path)
+        return (
+            "FCC Agent Debugger: The previous task's pending file could not be read "
+            f"(corrupt or missing: {pending_path.name}). It has been moved to "
+            ".fcc/debugger/failed/. Manual review recommended."
+        )
 
     task_name = data.get("task_name", "unknown")
     files = data.get("files_changed", [])
@@ -588,7 +623,7 @@ def _format_pipeline_injection(pending_path: Path) -> str:
     # File list (capped at 5 + "and N more")
     file_list = files[:5]
     if len(files) > 5:
-        file_list.append("...and {} more".format(len(files) - 5))
+        file_list.append(f"...and {len(files) - 5} more")
     files_str = "\n".join(f"  - {f}" for f in file_list) if file_list else "  (none)"
 
     # Test results
@@ -597,13 +632,10 @@ def _format_pipeline_injection(pending_path: Path) -> str:
         p = test_results.get("passed", 0)
         f = test_results.get("failed", 0)
         t = test_results.get("total", 0)
-        test_lines.append(
-            f"- Test Results: {p} passed, {f} failed ({t} total)"
-        )
+        test_lines.append(f"- Test Results: {p} passed, {f} failed ({t} total)")
         failures = test_results.get("failures", [])
         if failures:
-            for fail in failures[:5]:
-                test_lines.append(f"  {fail}")
+            test_lines.extend(f"  {fail}" for fail in failures[:5])
             if len(failures) > 5:
                 test_lines.append(f"  ...and {len(failures) - 5} more failures")
 
@@ -614,17 +646,17 @@ def _format_pipeline_injection(pending_path: Path) -> str:
 
     injection = (
         f"FCC Agent Debugger: The task '{task_name}' was just completed.\n"
-        f"\n"
         f"Commit range: {commit_str}\n"
         f"Files changed:\n{files_str}\n"
-        f"\n"
         f"{tests_str}\n"
-        f"\n"
         "To validate this work, dispatch the fcc-agent-debugger subagent to analyze "
         "the completed task. If issues are found, chain the fcc-agent-fixer subagent "
         "to apply fixes in a worktree. Use run_in_background: true for each "
         "dispatch and isolate all fix work in a git worktree under "
         ".claude/worktrees/."
     )
+
+    if len(injection) > MAX_INJECTION_CHARS:
+        injection = injection[:MAX_INJECTION_CHARS - 3] + "..."
 
     return injection

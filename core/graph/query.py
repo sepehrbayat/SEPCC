@@ -165,12 +165,10 @@ class GraphQuery:
         community_id = entity.get("community")
         if not community_id:
             return {"community": None, "peers": [], "size": 0}
-        community_row = self._store._conn.execute(
-            "SELECT * FROM communities WHERE id = ?", (community_id,)
-        ).fetchone()
+        community_row = self._store.get_community(community_id)
         peers = self._store.get_entities_by_community(community_id)
         return {
-            "community": dict(community_row) if community_row else {"id": community_id},
+            "community": community_row or {"id": community_id},
             "peers": [p for p in peers if p["id"] != entity_id],
             "size": len(peers),
         }
