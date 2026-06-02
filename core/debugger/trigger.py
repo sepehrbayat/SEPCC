@@ -63,8 +63,14 @@ def debugger_pipeline_context(prompt: str, root: Path) -> str:
     if not stripped or stripped.startswith("/"):
         return ""
 
+    # Flush pending queue before any other processing on cancellation
+    lowered = stripped.lower()
+    if any(term in lowered for term in _CANCELLATION_TERMS):
+        _flush_all_pending_to_skipped(root)
+        return ""
+
     pending_path = detect_task_transition(root, prompt)
-    if pending_path is None and _has_pending_queue(root):
+    if pending_path is None and _has_pending_queue(root) and not _lockfile_exists(root):
         pending_path = _pop_next_pending(root)
     if pending_path is None:
         return ""
@@ -88,6 +94,7 @@ def detect_task_transition(root: Path, prompt: str) -> Path | None:
 
     lowered = stripped.lower()
     if any(term in lowered for term in _CANCELLATION_TERMS):
+        _flush_all_pending_to_skipped(root)
         return None
 
     old_task = get_last_completed_task(root)

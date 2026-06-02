@@ -1,0 +1,21 @@
+{
+  "task_name": "Iâm going to send",
+  "transcript_path": "",
+  "files_changed": [
+    ".fcc/context/decisions.md",
+    ".fcc/context/handoff.md",
+    ".fcc/sessions.sqlite",
+    "cli/session_registry.py",
+    "core/_sys.py",
+    "core/debugger/trigger.py",
+    "core/graph/store.py",
+    "core/prompt_enhancer.py",
+    "scripts/windows/launch-fcc-claude.cmd",
+    "scripts/windows/stop-fcc-server-on-port.ps1",
+    "tests/scripts/test_windows_launcher.py",
+    "tests/test_prompt_enhancer.py"
+  ],
+  "commit_range": "0d6441d759c79b3c03bf78790ea213b076321baf..d9e8af97ba745f041b5c1d5e8f12e9ec3053366d",
+  "test_results": null,
+  "captured_at": "2026-06-02T12:02:52.303992+00:00"
+}

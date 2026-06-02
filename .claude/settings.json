@@ -1,0 +1,65 @@
+{
+  "env": {
+    "AUTO_PROMPT_ENHANCER": "true",
+    "CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE": "1",
+    "PROMPT_ENHANCER_MAX_OUTPUT_CHARS": "2000",
+    "PROMPT_ENHANCER_TIMEOUT": "12"
+  },
+  "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "uv run python scripts/hooks/precompact.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "uv run python scripts/hooks/session_start.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "uv run python scripts/hooks/stop.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "command": "uv run python scripts/hooks/subagent_stop.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "uv run python scripts/hooks/user_prompt_submit.py",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

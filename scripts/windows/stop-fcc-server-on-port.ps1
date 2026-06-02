@@ -25,9 +25,15 @@ function Test-IsSepccServer {
         return $false
     }
 
+    $isConsoleScript = $commandLine.IndexOf("fcc-server", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    $isPythonRunner = (
+        $commandLine.IndexOf("run-entrypoint.py", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+        $commandLine.IndexOf(" serve", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    )
+
     return (
         $commandLine.IndexOf($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-        $commandLine.IndexOf("fcc-server", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        ($isConsoleScript -or $isPythonRunner)
     )
 }
 

@@ -329,7 +329,7 @@ async def enhance_prompt_with_metadata(
         )
         return PromptEnhancementResult(prompt, prompt, "error")
 
-    if not enhanced:
+    if not enhanced.strip():
         trace_event(
             stage="enhancement",
             event="prompt.enhancement.empty",

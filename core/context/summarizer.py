@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 _DECISION_RE = re.compile(
-    r"\b(decided|decision|choose|chosen|must|default|owner|do not|never)\b",
+    r"\b(decided|decision|choose|chosen|never)\b",
     re.IGNORECASE,
 )
 

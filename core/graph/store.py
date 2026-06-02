@@ -133,6 +133,9 @@ class GraphStore:
         return True
 
     def insert_entity(self, entity: dict[str, Any]) -> None:
+        eid = entity.get("id")
+        if not eid or not isinstance(eid, str) or not eid.strip():
+            return  # Silently skip entities without valid IDs
         self._conn.execute(
             """
             INSERT OR REPLACE INTO entities
@@ -141,7 +144,7 @@ class GraphStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                entity["id"],
+                eid,
                 entity.get("name", ""),
                 entity.get("type", "unknown"),
                 entity.get("file"),

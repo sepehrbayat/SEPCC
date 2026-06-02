@@ -26,7 +26,7 @@ RUNTIME_CONTRACT_FILE = CONTEXT_DIR / "agent-runtime.md"
 PLUGIN_POLICY_FILE = Path(".fcc") / "plugin-policy.yml"
 
 _DECISION_RE = re.compile(
-    r"\b(decided|decision|choose|chosen|must|default|owner|do not|never)\b",
+    r"\b(decided|decision|choose|chosen|never)\b",
     re.IGNORECASE,
 )
 
@@ -142,6 +142,18 @@ def runtime_contract(root: Path, *, max_chars: int = 1500) -> str:
     return compact_lines(contract, max_lines=22, max_chars=max_chars)
 
 
+def _term_matches(lowered: str, terms: tuple[str, ...]) -> bool:
+    """Match terms against *lowered* text.  Terms starting with ``\b``
+    are treated as regex patterns; all others use substring matching."""
+    for term in terms:
+        if term.startswith(r"\b"):
+            if re.search(term, lowered):
+                return True
+        elif term in lowered:
+            return True
+    return False
+
+
 def prompt_routing_hint(prompt: str) -> str:
     """Return a tiny routing hint for prompts that need FCC orchestration."""
     stripped = prompt.lstrip()
@@ -149,19 +161,19 @@ def prompt_routing_hint(prompt: str) -> str:
         return ""
     lowered = prompt.lower()
     hints: list[str] = []
-    if any(term in lowered for term in _RECALL_TERMS):
+    if _term_matches(lowered, _RECALL_TERMS):
         hints.append(
             "recall: use handoff first, MemSearch for memory, Token Savior for code"
         )
-    if any(term in lowered for term in _REVIEW_TERMS):
+    if _term_matches(lowered, _REVIEW_TERMS):
         hints.append(
             "review: use fcc-code-reviewer/product-logic subagents when useful"
         )
-    if any(term in lowered for term in _RESEARCH_TERMS):
+    if _term_matches(lowered, _RESEARCH_TERMS):
         hints.append("research: use fcc-researcher and cite primary sources")
-    if any(term in lowered for term in _LARGE_WORK_TERMS):
+    if _term_matches(lowered, _LARGE_WORK_TERMS):
         hints.append("large task: use bounded multi-agent review; verify before final")
-    if any(term in lowered for term in _LOOP_TERMS):
+    if _term_matches(lowered, _LOOP_TERMS):
         hints.append(
             "loop: Ralph Loop only if configured, bounded, and test-verifiable"
         )
@@ -410,7 +422,7 @@ _RECALL_TERMS = (
     "continue",
 )
 _REVIEW_TERMS = (
-    "review",
+    r"\breview\b",
     "audit",
     "line by line",
     "bug",
@@ -560,7 +572,24 @@ def parse_transcript_text(transcript_path: Path | str | None) -> str:
 def summarize_transcript(text: str, *, max_items: int = 5) -> list[str]:
     if not text.strip():
         return ["- No transcript summary was available."]
-    return bulletize(text.splitlines()[-max_items:], max_items=max_items)
+    # Filter common Claude boilerplate to keep handoff actionable
+    boilerplate_prefixes = (
+        "assistant: i'll inspect",
+        "assistant: i'll start",
+        "assistant: let me",
+        "assistant: first, let me",
+        "assistant: now i'll",
+        "assistant: i need to",
+        "assistant: i can see",
+        "assistant: i see",
+        "assistant: let's",
+    )
+    meaningful = [
+        line
+        for line in text.splitlines()
+        if not line.lower().startswith(boilerplate_prefixes)
+    ]
+    return bulletize(meaningful[-max_items:], max_items=max_items)
 
 
 def extract_decisions(text: str, *, max_items: int = 5) -> list[str]:

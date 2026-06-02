@@ -48,30 +48,34 @@ if errorlevel 1 (
     )
 )
 
-REM Silent sync: uv run auto-creates venv and installs deps.
-REM Use a python import check instead of starting the server.
+REM Silent sync: uv run auto-creates venv and installs deps when possible.
+REM If an older SEPCC console script is still running and Windows locks its .exe,
+REM fall back to --no-sync for this launch instead of blocking startup.
 cd /d "%FCC_REPO%"
 echo Checking SEPCC environment...
-uv run python -c "import cli.entrypoints; import cli.bootstrap_context" >nul 2>&1
+uv run python "%FCC_REPO%\scripts\windows\run-entrypoint.py" check >nul 2>&1
 if errorlevel 1 (
-    echo.
-    echo First-time setup -- installing dependencies...
-    uv sync >"%TEMP%\sepcc-sync-out.txt" 2>&1
-    uv run python -c "import cli.entrypoints; import cli.bootstrap_context" >nul 2>&1
+    uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" check >nul 2>&1
     if errorlevel 1 (
         echo.
-        echo ================================================================
-        echo SEPCC environment setup failed.
-        echo.
-        type "%TEMP%\sepcc-sync-out.txt" 2>nul
-        echo.
-        echo ================================================================
+        echo First-time setup -- installing dependencies...
+        uv sync >"%TEMP%\sepcc-sync-out.txt" 2>&1
+        uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" check >nul 2>&1
+        if errorlevel 1 (
+            echo.
+            echo ================================================================
+            echo SEPCC environment setup failed.
+            echo.
+            type "%TEMP%\sepcc-sync-out.txt" 2>nul
+            echo.
+            echo ================================================================
+            del "%TEMP%\sepcc-sync-out.txt" 2>nul
+            pause
+            exit /b 1
+        )
         del "%TEMP%\sepcc-sync-out.txt" 2>nul
-        pause
-        exit /b 1
+        echo Dependencies ready.
     )
-    del "%TEMP%\sepcc-sync-out.txt" 2>nul
-    echo Dependencies ready.
 )
 
 REM --------------------------------------------------------------------
@@ -79,7 +83,7 @@ REM Phase 1: Start the proxy server
 REM --------------------------------------------------------------------
 set "FCC_PORT=8082"
 set "FCC_PORT_FILE=%TEMP%\fcc-port-%RANDOM%.txt"
-uv run python "%FCC_REPO%\scripts\windows\get-fcc-port.py" > "%FCC_PORT_FILE%" 2>nul
+uv run --no-sync python "%FCC_REPO%\scripts\windows\get-fcc-port.py" > "%FCC_PORT_FILE%" 2>nul
 if exist "%FCC_PORT_FILE%" set /p FCC_PORT=<"%FCC_PORT_FILE%"
 del "%FCC_PORT_FILE%" 2>nul
 
@@ -94,7 +98,7 @@ if exist "%FCC_REPO%\scripts\windows\stop-fcc-server-on-port.ps1" (
     )
 )
 
-start "SEPCC Server" cmd /k "cd /d %FCC_REPO% && set FCC_OPEN_BROWSER=0 && uv run fcc-server"
+start "SEPCC Server" cmd /k "cd /d %FCC_REPO% && set FCC_OPEN_BROWSER=0 && uv run --no-sync python scripts\windows\run-entrypoint.py serve"
 
 echo Waiting for the proxy to become healthy on port %FCC_PORT%...
 powershell -NoProfile -Command "for ($i = 0; $i -lt 30; $i++) { try { Invoke-WebRequest -Uri ('http://127.0.0.1:' + $env:FCC_PORT + '/health') -UseBasicParsing -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep -Seconds 1 } }; exit 1"
@@ -182,7 +186,7 @@ if "%BOOTSTRAP_NEW%"=="1" (
     echo Running context bootstrap to install hooks, agents, skills,
     echo commands, and the handoff system ^(50+ scaffolding files^)...
     echo.
-    uv run fcc-bootstrap-context --target "%FCC_PROJECT%"
+    uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" bootstrap --target "%FCC_PROJECT%"
     if errorlevel 1 (
         echo Bootstrap failed. Continuing without context layer.
     ) else (
@@ -212,17 +216,17 @@ if "%BOOTSTRAP_NEW%"=="1" (
     if /i "!BOOTSTRAP_CHOICE!"=="" set "BOOTSTRAP_CHOICE=y"
     if /i "!BOOTSTRAP_CHOICE!"=="y" (
         echo.
-        uv run fcc-bootstrap-context --target "%FCC_PROJECT%"
+        uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" bootstrap --target "%FCC_PROJECT%"
         if errorlevel 1 (
             echo Bootstrap failed. You can retry later with:
-            echo   uv run fcc-bootstrap-context --force
+            echo   uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" bootstrap --target "%FCC_PROJECT%"
         ) else (
             echo All scaffolding files are now in place.
         )
     ) else (
         echo.
         echo Skipped. You can run this later with:
-        echo   uv run fcc-bootstrap-context --force
+        echo   uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" bootstrap --target "%FCC_PROJECT%"
     )
     echo.
 ) else (
@@ -236,9 +240,9 @@ REM --------------------------------------------------------------------
 where wt >nul 2>&1
 if not errorlevel 1 (
     echo Starting in Windows Terminal...
-    wt -d "!FCC_PROJECT!" cmd /k "cd /d !FCC_REPO! && uv run fcc-claude ""!FCC_PROJECT!"""
+    wt -d "!FCC_PROJECT!" cmd /k "cd /d !FCC_REPO! && uv run --no-sync python scripts\windows\run-entrypoint.py launch ""!FCC_PROJECT!"""
 ) else (
-    uv run fcc-claude "%FCC_PROJECT%"
+    uv run --no-sync python "%FCC_REPO%\scripts\windows\run-entrypoint.py" launch "%FCC_PROJECT%"
     if errorlevel 1 pause
 )
 endlocal
