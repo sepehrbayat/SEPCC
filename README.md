@@ -2,7 +2,9 @@
 
 # SEPCC — Unlimited Claude Code, with context that survives
 
-A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, visible auto prompt enhancement, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
+> **v2.1.0** — Agent Debugger · Knowledge Graph · 30+ bug fixes · 1,804 tests
+
+A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, visible auto prompt enhancement, an agent debugger and fixer pipeline, a knowledge graph for codebase-wide structural understanding, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Python 3.14](https://img.shields.io/badge/python-3.14-3776ab.svg?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
@@ -25,6 +27,8 @@ A free and open-source proxy that gives you **unlimited Claude Code** access by 
 - [Providers](#providers)
 - [Connect your editor](#connect-your-editor)
 - [Discord and Telegram bots](#discord-and-telegram-bots)
+- [Agent Debugger](#agent-debugger)
+- [Knowledge Graph](#knowledge-graph-graphify)
 - [Auto prompt enhancement](#auto-prompt-enhancement)
 - [Your first prompt](#your-first-prompt)
 - [How it works](#how-it-works)
@@ -129,6 +133,77 @@ Validates and auto-repairs the scaffolding. Checks:
 - Token Savior is the code retrieval owner
 - Ralph Loop has bounds and verification
 - SubagentStop is correctly used as the subagent lifecycle hook
+- knowledge graph health (missing, stale, >50MB warning)
+
+### Agent Debugger — automatic post-task review and repair
+
+SEPCC watches subagent output. When you finish one task and start another, it automatically analyzes the completed work and dispatches a fixer agent to repair any issues found — all in the background while you keep working.
+
+```text
+You: "add rate limiting to the API"
+
+┌──────────────────────────────────────────────────────┐
+│  FOREGROUND: Agent works on your new task             │
+│                                                       │
+│  BACKGROUND CHAIN:                                     │
+│  ┌─────────────────────────────────────────┐           │
+│  │ fcc-agent-debugger                       │           │
+│  │ Analyzes correctness, completeness,      │           │
+│  │ and process compliance of task 1         │           │
+│  │ → Produces structured DebugReport        │           │
+│  └──────────────┬──────────────────────────┘           │
+│                 │                                      │
+│  ┌──────────────▼──────────────────────────┐           │
+│  │ fcc-agent-fixer                          │           │
+│  │ Fixes bugs (git worktree isolation)      │           │
+│  │ Runs tests after each batch              │           │
+│  │ Commits fixes, writes FixReport          │           │
+│  └──────────────────────────────────────────┘           │
+└──────────────────────────────────────────────────────┘
+```
+
+The debugger checks:
+- **Correctness** — bugs, logic errors, type mismatches, race conditions, test failures
+- **Completeness** — missing files, half-implemented features, TODO markers, stubs
+- **Process** — did the agent follow CLAUDE.md rules, run tests, document decisions?
+
+The fixer runs in a git worktree so it never conflicts with your active work. The pipeline is completely automatic — detected by the `UserPromptSubmit` hook when your next prompt describes a different task. No configuration needed.
+
+### Knowledge Graph (Graphify)
+
+SEPCC can build a structural map of your entire codebase — entities, relationships, communities, and intent annotations — using the [Graphify](https://github.com/safishamsi/graphify) knowledge graph engine. Agents get pre-computed codebase understanding without re-reading the entire codebase every session.
+
+```bash
+fcc-bootstrap-context --install-graphify
+```
+
+Once installed, every session starts with a compact structural summary:
+
+```
+## Project Structure
+Primary domains:
+  • auth-infra (23 nodes) — Authentication, sessions, token management
+  • api-gateway (18 nodes) — Request routing, middleware, rate limiting
+
+Key abstractions:
+  • AuthManager (god, 0.92 centrality, 23 connections)
+  • ApiGateway (god, 0.87 centrality, 18 connections)
+```
+
+When you mention entities in a prompt, the graph injects their neighborhood:
+
+```
+[Graph Context]
+Matched entities:
+  • AuthManager (src/auth/manager.py:42) — god node, 23 connections
+    Community: auth-infra
+    Depends on: ErrorFormatter, TokenValidator, SessionStore
+    Called by: LoginFlow, SignupFlow, PasswordReset
+```
+
+Eight MCP tools available during sessions: `fcc_graph_search`, `fcc_graph_neighbors`, `fcc_graph_impact`, `fcc_graph_path`, `fcc_graph_god_nodes`, `fcc_graph_community`, `fcc_graph_entity`, `fcc_graph_stats`. The graph auto-rebuilds on each commit (AST-only, no API cost) via the graphify git hook.
+
+Supported languages: 33 via tree-sitter AST parsing (Python, TypeScript, JavaScript, Go, Rust, Java, C/C++, Ruby, C#, Kotlin, Swift, and more). Docs, PDFs, images, and video supported via opt-in extensions.
 
 ### Subagent architecture — a note
 
@@ -163,6 +238,10 @@ Claude Code's official docs document `SubagentStop` as the stable hook for subag
 | Gemini thinking controls | bugged | **fixed** |
 | System proxy support | no | **yes** |
 | Windows launcher | basic | **self-heals duplicate local server ports** |
+| Agent debugger & fixer | no | **yes — automatic post-task review and repair** |
+| Knowledge graph integration | no | **yes — Graphify, SQLite + FTS5, 8 MCP tools** |
+| Graph-informed routing | no | **yes — god nodes → Opus, unknown entities → Haiku** |
+| 30+ verified bug fixes | no | **yes — adversarial audit, 42 edge-case tests** |
 
 ---
 
@@ -334,6 +413,131 @@ Configure in Admin UI → Messaging. `/stop` cancels, `/clear` resets, `/stats` 
 ### Voice notes
 
 Install with voice extras, configure in Admin UI → Messaging → Voice. Supports local Whisper or NVIDIA NIM.
+
+---
+
+## Agent Debugger
+
+SEPCC includes an automatic agent debugger pipeline that monitors subagent output, detects when you move from one task to the next, and dispatches a debugger→fixer chain to analyze and repair the previous task's work — all without blocking your forward progress.
+
+### How it works
+
+When the `UserPromptSubmit` hook detects that your next prompt describes a fundamentally different task from what you were just working on (keyword overlap < 40%), it captures the previous task's metadata — transcript path, changed files, git commit range — and injects a dispatch instruction into the agent's context. The debugger and fixer run as background subagents while you continue working:
+
+1. **fcc-agent-debugger** — reads the previous task's full transcript, runs `git diff` on changed files, checks correctness (bugs, logic errors, type mismatches, race conditions), completeness (missing features, TODO markers, stubs, coverage gaps), and process compliance (did the agent follow CLAUDE.md rules, run tests, document decisions?). Produces a structured `DebugReport` to `.fcc/debugger/reports/`.
+
+2. **fcc-agent-fixer** — reads the DebugReport, creates a git worktree for isolation, fixes findings in priority order (correctness → completeness → process), runs tests after each fix batch, commits results, and writes a `FixReport` to `.fcc/debugger/fixes/`. The worktree ensures zero conflict with your active work.
+
+The existing `SubagentStop` hook feeds both agents' results into `.fcc/context/handoff.md` automatically — future sessions see what was found and fixed.
+
+### Transition detection
+
+The trigger compares your new prompt's keywords against the previous task title. Continuations and clarifications pass through without interruption. Genuine task switches fire the pipeline. Cancellation terms ("skip debug", "cancel debug", "never mind") flush the pending queue.
+
+### File layout
+
+```
+.fcc/debugger/
+├── pending/           # Tasks awaiting analysis
+├── reports/           # DebugReport output
+├── fixes/             # FixReport output
+├── failed/            # Unprocessable reports
+├── skipped/           # User-cancelled tasks
+└── lock               # Prevents concurrent fixer execution
+```
+
+### Error handling
+
+- No previous task → silent skip
+- Debugger subagent fails → Fixer detects missing report, writes failure notice to handoff
+- Rapid task switching → Queue in `pending/`, processed sequentially
+- Fixer and main agent touch same files → Git worktree isolation prevents any conflict
+- No test suite → All fixes flagged as `verified: false`
+
+---
+
+## Knowledge Graph (Graphify)
+
+SEPCC integrates [Graphify](https://github.com/safishamsi/graphify) (MIT-licensed, 58k★) as a knowledge graph layer. Graphify parses code (33 languages via tree-sitter AST) and unstructured content into a structured graph with entities, relations, communities, and intent annotations. SEPCC wraps it in a thin FCC-native layer (`core/graph/`) that loads the graph into SQLite with FTS5 full-text search, provides graph traversal query tools, and injects structural summaries into sessions.
+
+### Bootstrap
+
+```bash
+fcc-bootstrap-context --install-graphify
+```
+
+This installs `graphifyy[leiden]` (Leiden community detection), builds the initial graph to `.fcc/graph/graph.json`, registers the `fcc-graph` MCP server in `.mcp.json`, and installs a git hook that auto-rebuilds the graph on every commit (AST-only, no API cost).
+
+### How agents use it
+
+| Touchpoint | What happens |
+|---|---|
+| **Session start** | Community overview + god nodes (top 8 by centrality) injected into context |
+| **Every prompt** | Entity matches from graph injected (e.g., "AuthManager, 23 connections, god node") |
+| **During work** | 8 MCP tools available: `fcc_graph_search`, `fcc_graph_neighbors`, `fcc_graph_impact`, `fcc_graph_path`, `fcc_graph_god_nodes`, `fcc_graph_community`, `fcc_graph_entity`, `fcc_graph_stats` |
+| **Pre-compaction** | Structural anchors preserved so orientation survives context compaction |
+| **Handoff** | `## Structural Context` section with active communities, modified god nodes, impact radius |
+| **Routing** | `graph_rules` in `.fcc/router.yml`: editing a god node (centrality > 0.8) → Opus tier; unknown entity → Haiku tier |
+
+### Architecture
+
+```
+graphify . --output .fcc/graph/     ← extraction (once, on bootstrap or commit)
+       │
+       ▼
+.fcc/graph/graph.json               ← source of truth
+       │
+       ▼
+core/graph/loader.py                ← validates, normalizes, ingests
+       │
+       ▼
+core/graph/store.py                 ← SQLite + FTS5 persistence
+       │
+       ▼
+core/graph/query.py                 ← BFS traversal: neighbors, impact, path, gods, search
+       │
+       ▼
+core/graph/context.py               ← builds injection strings for hooks
+       │
+       ▼
+scripts/hooks/session_start.py      ← injects structural summary at session start
+scripts/hooks/user_prompt_submit.py ← injects entity matches at prompt submit
+scripts/hooks/precompact.py         ← injects structural anchors before compaction
+scripts/graph/mcp_server.py         ← 8 MCP tools over stdio JSON-RPC
+```
+
+### SQLite schema
+
+The graph is stored in `.fcc/graph/store.db` with four tables: `entities`, `relations`, `communities`, and `entity_fts` (FTS5 full-text search with triggers for auto-sync). All graph traversal uses BFS over adjacency queries — read-only during sessions, rebuilt on commit.
+
+### Error handling
+
+- No graph exists → all injections return empty (graph is an enhancement, not a requirement)
+- Graph stale vs git HEAD → Context doctor warns; load anyway with version note
+- `graph.json` malformed → `GraphLoadError` raised; hooks catch and surface gracefully
+- Entity not found → queries return `None` or empty; MCP returns structured `{error: "not_found"}`
+- FTS5 unavailable → search falls back to `LIKE '%query%'` with a logged warning
+- Race: graph rebuilt during session → store holds old version until next explicit reload
+
+### Graph-informed model routing
+
+`.fcc/router.yml` includes `graph_rules` that the `route-task` skill evaluates:
+
+```yaml
+graph_rules:
+  - match: "graph:centrality > 0.8"
+    tier: opus
+    reason: "Editing a god node — broad transitive effects require careful reasoning"
+  - match: "graph:community:size > 20"
+    tier: opus
+    reason: "Large architectural domain warrants stronger reasoning"
+  - match: "graph:impact:files > 10"
+    tier: opus
+    reason: "Broad change requires careful planning across many files"
+  - match: "graph:unknown"
+    tier: haiku
+    reason: "No matching entity — exploratory task, start with fast model"
+```
 
 ---
 
@@ -662,19 +866,29 @@ SEPCC/
 ├── server.py              # entry point
 ├── api/                   # FastAPI routes, admin UI, model router
 ├── core/
+│   ├── _sys.py            # shared process/slug utilities
 │   ├── anthropic/         # protocol helpers, SSE, thinking, tools
-│   └── context/           # handoff, retrieval, SQLite store (SEPCC)
+│   ├── context/           # handoff, retrieval, SQLite store, summarizer
+│   ├── debugger/          # agent debugger — report schema + trigger logic
+│   └── graph/             # knowledge graph — store, loader, query, context
 ├── providers/             # 17 provider transports + registry
 ├── messaging/             # Discord, Telegram, voice
 ├── cli/                   # launcher, session mgmt, bootstrap, doctor
 ├── config/                # settings, provider catalog
-├── scripts/hooks/         # lifecycle hook scripts
+├── scripts/
+│   ├── hooks/             # lifecycle hook scripts (5 events)
+│   ├── graph/             # MCP server (8 knowledge graph tools)
+│   └── windows/           # desktop shortcut launcher
 ├── .agents/               # Codex project skills used by this repo
+├── .claude/
+│   ├── agents/            # project agents (code-review, debugger, fixer, ...)
+│   ├── skills/            # Claude Code project skills
+│   └── commands/          # slash commands
 ├── .codex/                # Codex project agents, config, and hooks
 ├── .fcc/                  # handoff, decisions, indexes, and local runtime state
 ├── templates/project/     # bootstrap scaffold
-├── docs/                  # context hardening docs
-└── tests/                 # unit, contract, smoke
+├── docs/                  # design specs and implementation plans
+└── tests/                 # 1,804 unit, integration, contract, advanced, and smoke tests
 ```
 
 ### Running from source
@@ -701,6 +915,10 @@ uv run pytest
 - `fcc-server` — start the proxy
 - `fcc-init` — scaffold `~/.fcc/.env`
 - `fcc-claude` — compatibility launcher
+- `fcc-bootstrap-context` — scaffold project context (hooks, agents, skills, handoff)
+- `fcc-bootstrap-context --install-graphify` — also install knowledge graph tooling
+- `fcc context doctor` — validate and auto-repair context scaffolding
+- `fcc sessions list/doctor` — session registry management
 - `free-claude-code` — alias for `fcc-server`
 
 ### Adding a provider
