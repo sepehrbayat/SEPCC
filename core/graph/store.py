@@ -16,8 +16,15 @@ class GraphStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
+        self._closed = False
         self._create_tables()
         self._has_fts5 = self._check_fts5()
+
+    def __enter__(self) -> GraphStore:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     def _create_tables(self) -> None:
         self._conn.executescript(
@@ -78,6 +85,28 @@ class GraphStore:
                     name, docstring, intents,
                     content='entities', content_rowid='rowid'
                 )
+                """
+            )
+            # Triggers keep entity_fts in sync with the entities table.
+            # Without these, FTS5 content-sync virtual tables do NOT
+            # auto-populate on INSERT — only on the special 'rebuild'
+            # command.
+            self._conn.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS entities_ai AFTER INSERT ON entities BEGIN
+                    INSERT INTO entity_fts(rowid, name, docstring, intents)
+                    VALUES (new.rowid, new.name, new.docstring, new.intents);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entities_ad AFTER DELETE ON entities BEGIN
+                    INSERT INTO entity_fts(entity_fts, rowid, name, docstring, intents)
+                    VALUES ('delete', old.rowid, old.name, old.docstring, old.intents);
+                END;
+                CREATE TRIGGER IF NOT EXISTS entities_au AFTER UPDATE ON entities BEGIN
+                    INSERT INTO entity_fts(entity_fts, rowid, name, docstring, intents)
+                    VALUES ('delete', old.rowid, old.name, old.docstring, old.intents);
+                    INSERT INTO entity_fts(rowid, name, docstring, intents)
+                    VALUES (new.rowid, new.name, new.docstring, new.intents);
+                END;
                 """
             )
             self._conn.commit()
@@ -278,6 +307,9 @@ class GraphStore:
         return row["cnt"] if row else 0
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self._conn.close()
 
     @staticmethod

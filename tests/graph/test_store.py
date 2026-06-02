@@ -151,6 +151,27 @@ def test_fts_search_no_results(store: GraphStore) -> None:
     assert results == []
 
 
+def test_fts_search_docstring_only(store: GraphStore) -> None:
+    """FTS5 must find text that only appears in docstring, not in name."""
+    store.insert_entity({
+        "id": "p.py::handler",
+        "name": "handler",
+        "type": "function",
+        "docstring": "Implements OAuth2 token exchange",
+    })
+    store.commit()
+    # "OAuth2" only appears in docstring — verifies FTS5 triggers work
+    results = store.search_fts("OAuth2", limit=10)
+    assert len(results) >= 1
+    assert results[0]["name"] == "handler"
+
+
+def test_double_close_no_error(store: GraphStore) -> None:
+    """Double close() must not raise an error."""
+    store.close()
+    store.close()  # Should be a silent no-op
+
+
 def test_top_by_centrality(store: GraphStore) -> None:
     store.insert_entity({"id": "a", "name": "low", "type": "class", "centrality": 0.1})
     store.insert_entity({"id": "b", "name": "mid", "type": "class", "centrality": 0.5})
