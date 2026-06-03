@@ -2,7 +2,7 @@
 
 # SEPCC — Unlimited Claude Code, with context that survives
 
-> **v2.1.0** — Agent Debugger · Knowledge Graph · 30+ bug fixes · 1,804 tests
+> **v2.2.0** — Knowledge Graph v2 · Directional Centrality · Test-Filtered Impact · 308 graph tests · Zero-Leak MCP
 
 A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, visible auto prompt enhancement, an agent debugger and fixer pipeline, a knowledge graph for codebase-wide structural understanding, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
 
@@ -169,9 +169,9 @@ The debugger checks:
 
 The fixer runs in a git worktree so it never conflicts with your active work. The pipeline is completely automatic — detected by the `UserPromptSubmit` hook when your next prompt describes a different task. No configuration needed.
 
-### Knowledge Graph (Graphify)
+### Knowledge Graph (Graphify) — v2.2
 
-SEPCC can build a structural map of your entire codebase — entities, relationships, communities, and intent annotations — using the [Graphify](https://github.com/safishamsi/graphify) knowledge graph engine. Agents get pre-computed codebase understanding without re-reading the entire codebase every session.
+SEPCC builds a structural map of your entire codebase — 6,993 entities, 16,247 relations, 282 communities — using the [Graphify](https://github.com/safishamsi/graphify) knowledge graph engine (MIT-licensed, 58k★, 33 languages via tree-sitter). Agents get pre-computed codebase understanding without re-reading the entire codebase every session.
 
 ```bash
 fcc-bootstrap-context --install-graphify
@@ -182,12 +182,12 @@ Once installed, every session starts with a compact structural summary:
 ```
 ## Project Structure
 Primary domains:
-  • auth-infra (23 nodes) — Authentication, sessions, token management
-  • api-gateway (18 nodes) — Request routing, middleware, rate limiting
+  • Community 17 (67 nodes) — API service layer
+  • Community 5 (83 nodes) — Provider factory
 
 Key abstractions:
-  • AuthManager (god, 0.92 centrality, 23 connections)
-  • ApiGateway (god, 0.87 centrality, 18 connections)
+  • Settings (god, 1.00 centrality, 227 connections)
+  • MessagesRequest (god, 0.54 centrality, 111 connections)
 ```
 
 When you mention entities in a prompt, the graph injects their neighborhood:
@@ -195,15 +195,29 @@ When you mention entities in a prompt, the graph injects their neighborhood:
 ```
 [Graph Context]
 Matched entities:
-  • AuthManager (src/auth/manager.py:42) — god node, 23 connections
-    Community: auth-infra
-    Depends on: ErrorFormatter, TokenValidator, SessionStore
-    Called by: LoginFlow, SignupFlow, PasswordReset
+  • Settings (config/settings.py:L110), 227 connections
+    Community: 203
+  • ModelRouter (api/model_router.py:L37), 52 connections
+    Community: 17
 ```
 
-Eight MCP tools available during sessions: `fcc_graph_search`, `fcc_graph_neighbors`, `fcc_graph_impact`, `fcc_graph_path`, `fcc_graph_god_nodes`, `fcc_graph_community`, `fcc_graph_entity`, `fcc_graph_stats`. The graph auto-rebuilds on each commit (AST-only, no API cost) via the graphify git hook.
+**Nine MCP tools** available during sessions:
 
-Supported languages: 33 via tree-sitter AST parsing (Python, TypeScript, JavaScript, Go, Rust, Java, C/C++, Ruby, C#, Kotlin, Swift, and more). Docs, PDFs, images, and video supported via opt-in extensions.
+| Tool | Description |
+|---|---|
+| `fcc_graph_search` | Full-text search with progressive token-level recall (FTS5 → LIKE → token-AND → token-OR) |
+| `fcc_graph_neighbors` | N-hop neighbourhood — dependencies, dependents, community peers |
+| `fcc_graph_impact` | Transitive closure with relation-type filtering and test-file exclusion |
+| `fcc_graph_explain` | Human-readable entity summary — in/out-degree, production vs test dependents |
+| `fcc_graph_path` | Shortest dependency path with edge-type filtering and test exclusion |
+| `fcc_graph_god_nodes` | Most-depended-on entities ranked by **in-degree** centrality (what depends on me) |
+| `fcc_graph_community` | Community membership and peer listing |
+| `fcc_graph_entity` | Full entity detail by ID |
+| `fcc_graph_stats` | Graph summary + commit staleness detection (`needs_update: true/false`) |
+
+**v2.2 improvements:** directional centrality based on in-degree (not total degree), test-file filtering across all tools (`exclude_tests: true`), builtin/external entity filtering (`exclude_external: true`), rationale/docstring entity filtering from impact results, MCP server connection caching (zero leak), JSON-RPC compliance (-32602/-32700), progressive search fallbacks for naming convention mismatches (snake_case → PascalCase), graphify 0.8.x format support.
+
+**Reliability:** 308 dedicated graph tests · 99.0% entity line-number accuracy · 0 builtins in god nodes · 0 rationale entities in impact results · graph health checks in doctor (missing, stale, oversized, multigraph edge-collapse risk, git hook status, token savings benchmark).
 
 ### Subagent architecture — a note
 
@@ -239,7 +253,7 @@ Claude Code's official docs document `SubagentStop` as the stable hook for subag
 | System proxy support | no | **yes** |
 | Windows launcher | basic | **self-heals duplicate local server ports** |
 | Agent debugger & fixer | no | **yes — automatic post-task review and repair** |
-| Knowledge graph integration | no | **yes — Graphify, SQLite + FTS5, 8 MCP tools** |
+| Knowledge graph integration | no | **yes — Graphify, SQLite + FTS5, 9 MCP tools, directional centrality, test-filtered impact** |
 | Graph-informed routing | no | **yes — god nodes → Opus, unknown entities → Haiku** |
 | 30+ verified bug fixes | no | **yes — adversarial audit, 42 edge-case tests** |
 
@@ -472,12 +486,17 @@ This installs `graphifyy[leiden]` (Leiden community detection), builds the initi
 
 | Touchpoint | What happens |
 |---|---|
-| **Session start** | Community overview + god nodes (top 8 by centrality) injected into context |
-| **Every prompt** | Entity matches from graph injected (e.g., "AuthManager, 23 connections, god node") |
-| **During work** | 8 MCP tools available: `fcc_graph_search`, `fcc_graph_neighbors`, `fcc_graph_impact`, `fcc_graph_path`, `fcc_graph_god_nodes`, `fcc_graph_community`, `fcc_graph_entity`, `fcc_graph_stats` |
+| **Session start** | Community overview + god nodes (top 8 by in-degree centrality) injected into context |
+| **Every prompt** | Entity matches from graph injected with community, connection count, god-node markers |
+| **During work** | 9 MCP tools: search (progressive FTS5→LIKE→token-AND→token-OR), neighbors, impact (relation-filtered, test-excluded), explain (in/out, prod/test split), path (edge-filtered, test-excluded), god nodes (in-degree ranked, builtin-filtered), community, entity, stats (staleness) |
 | **Pre-compaction** | Structural anchors preserved so orientation survives context compaction |
-| **Handoff** | `## Structural Context` section with active communities, modified god nodes, impact radius |
+| **Handoff** | `## Structural Context` section with active communities, modified god nodes, graph version |
+| **Context doctor** | 6 graph health checks: missing, stale (commit mismatch), oversized (>50MB), multigraph edge-collapse risk, git hook installed, token savings benchmark |
 | **Routing** | `graph_rules` in `.fcc/router.yml`: editing a god node (centrality > 0.8) → Opus tier; unknown entity → Haiku tier |
+
+### Centrality and Direction
+
+v2.2 uses **directional centrality** — computed from in-degree (how many things depend on this entity), not total degree. This correctly identifies entities with architectural gravity rather than entities that merely import many things. `exclude_external: true` filters Python builtins (`str`, `int`, `Exception`) from god node results. `exclude_tests: true` removes test/smoke artifacts from impact analysis, paths, and explain output.
 
 ### Architecture
 
@@ -488,13 +507,13 @@ graphify . --output .fcc/graph/     ← extraction (once, on bootstrap or commit
 .fcc/graph/graph.json               ← source of truth
        │
        ▼
-core/graph/loader.py                ← validates, normalizes, ingests
+core/graph/loader.py                ← validates, normalizes, ingests, computes centrality
        │
        ▼
-core/graph/store.py                 ← SQLite + FTS5 persistence
+core/graph/store.py                 ← SQLite + FTS5 + in_degree/out_degree columns
        │
        ▼
-core/graph/query.py                 ← BFS traversal: neighbors, impact, path, gods, search
+core/graph/query.py                 ← directed BFS: impact, path (with filters), explain (split)
        │
        ▼
 core/graph/context.py               ← builds injection strings for hooks
@@ -503,21 +522,23 @@ core/graph/context.py               ← builds injection strings for hooks
 scripts/hooks/session_start.py      ← injects structural summary at session start
 scripts/hooks/user_prompt_submit.py ← injects entity matches at prompt submit
 scripts/hooks/precompact.py         ← injects structural anchors before compaction
-scripts/graph/mcp_server.py         ← 8 MCP tools over stdio JSON-RPC
+scripts/graph/mcp_server.py         ← 9 MCP tools over stdio JSON-RPC (cached, JSON-RPC compliant)
 ```
 
 ### SQLite schema
 
-The graph is stored in `.fcc/graph/store.db` with four tables: `entities`, `relations`, `communities`, and `entity_fts` (FTS5 full-text search with triggers for auto-sync). All graph traversal uses BFS over adjacency queries — read-only during sessions, rebuilt on commit.
+The graph is stored in `.fcc/graph/store.db` with a `schema_meta` table for metadata (`graph_version`, `built_at_commit`, `source_node_count`, `source_edge_count`), `entities` with `in_degree` and `out_degree` columns, `relations`, `communities`, and `entity_fts` (FTS5 full-text search). `warnings()` method surfaces accumulated non-fatal errors (JSON parse failures, FTS5 trigger issues).
 
 ### Error handling
 
 - No graph exists → all injections return empty (graph is an enhancement, not a requirement)
-- Graph stale vs git HEAD → Context doctor warns; load anyway with version note
+- Graph corrupted → MCP returns distinct "corrupted" vs "missing" diagnostic
+- Graph stale vs git HEAD → `fcc_graph_stats.needs_update` flag; doctor warns
 - `graph.json` malformed → `GraphLoadError` raised; hooks catch and surface gracefully
 - Entity not found → queries return `None` or empty; MCP returns structured `{error: "not_found"}`
-- FTS5 unavailable → search falls back to `LIKE '%query%'` with a logged warning
-- Race: graph rebuilt during session → store holds old version until next explicit reload
+- FTS5 unavailable → search falls back to `LIKE` on name+docstring, then token-level AND/OR
+- Missing required params → JSON-RPC -32602 (Invalid params), not generic -32603
+- Parse errors → JSON-RPC -32700 response, not silent skip
 
 ### Graph-informed model routing
 

@@ -1110,7 +1110,8 @@ def test_missing_ralph_plugin_does_not_break_context_doctor(tmp_path: Path) -> N
 
     assert report["ralph_loop_policy_valid"] is True
     non_graph_issues = [
-        i for i in report["issues"] if "knowledge graph" not in i
+        i for i in report["issues"]
+        if "knowledge graph" not in i and "graphify" not in i.lower()
     ]
     assert non_graph_issues == []
 

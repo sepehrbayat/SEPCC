@@ -5,6 +5,17 @@
     }
   },
   "mcpServers": {
+    "fcc-graph": {
+      "command": "uv",
+      "args": [
+        "run",
+        "python",
+        "scripts/graph/mcp_server.py"
+      ],
+      "env": {
+        "FCC_PROJECT_ROOT": "${CLAUDE_PROJECT_DIR:-.}"
+      }
+    },
     "token-savior": {
       "args": [
         "--from",

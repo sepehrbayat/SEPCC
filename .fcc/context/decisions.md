@@ -70,3 +70,23 @@
 - **Issue:** The decision regex is:
 - r"\b(decided|decision|choose|chosen|must|default|owner|do not|never)\b"
 - This matches many non-decision patterns:
+## 2026-06-02
+- sqlite` to gitignore so runtime state never leaks again, then verify everything:
+- gitignore` so it never leaks into the repo again
+## 2026-06-02
+- FTS5 injection hardening, race condition fixes, connection leak fixes, dangerous query escaping, atomic handoff writes, boilerplate filtering, decision extraction improvements,...
+## 2026-06-03
+- SEPCC has its own knowledge graph MCP server with **8 graph tools** (`fcc_graph_search`, `neighbors`, `impact`, `path`, `god_nodes`, `community`, `entity`, `stats`) — but it was...
+## 2026-06-03
+- **Per-question decision:** Even after the user accepts, decide FOR EACH QUESTION whether to use the browser or the terminal
+## 2026-06-03
+- **Decision:** Independent domains - abort logic separate from batch completion separate from race conditions
+## 2026-06-03
+- The infrastructure noise is walled off behind a flag — agents can choose production-only or full view
+## 2026-06-03
+- ** `_get_query()` creates new `GraphStore` on EVERY tool call, never closes
+- py`) also never close
+- get("in_degree")` set at load time, never updated
+- py:392-394` | **Dead code** — `_json_errors` set never read or exposed |
+## 2026-06-03
+- assistant: Found it! `in_deg[eid]` on a Python `Counter` returns 0 for missing keys but **never creates the entry**

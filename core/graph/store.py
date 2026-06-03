@@ -18,7 +18,7 @@ class GraphStore:
         self._conn = sqlite3.connect(str(self._db_path))
         self._conn.row_factory = sqlite3.Row
         self._closed = False
-        self._json_errors: set[str] = set()
+        self._sql_errors: list[str] = []  # B12: surfaced errors from row parsing
         self._fts_trigger_error: str | None = None
         self._create_tables()
         self._has_fts5 = self._check_fts5()
@@ -40,6 +40,8 @@ class GraphStore:
                 line INTEGER,
                 community TEXT,
                 centrality REAL,
+                in_degree INTEGER DEFAULT 0,
+                out_degree INTEGER DEFAULT 0,
                 docstring TEXT,
                 intents TEXT,
                 metadata TEXT
@@ -60,6 +62,16 @@ class GraphStore:
             );
             """
         )
+        # Backfill columns for stores created before in_degree/out_degree existed.
+        # Only swallow "duplicate column name" errors — re-raise all others.
+        for col in ("in_degree", "out_degree"):
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE entities ADD COLUMN {col} INTEGER DEFAULT 0"
+                )
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name)"
         )
@@ -152,8 +164,8 @@ class GraphStore:
                 entity.get("community"),
                 entity.get("centrality"),
                 entity.get("docstring"),
-                json.dumps(entity.get("intents", [])) if entity.get("intents") else None,
-                json.dumps(entity.get("metadata")) if entity.get("metadata") else None,
+                json.dumps(entity.get("intents", [])) if entity.get("intents") is not None else None,
+                json.dumps(entity.get("metadata")) if entity.get("metadata") is not None else None,
             ),
         )
 
@@ -226,6 +238,34 @@ class GraphStore:
         )
         self._conn.commit()
 
+    def meta_get(self, key: str) -> str | None:
+        """Read an arbitrary value from schema_meta."""
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM schema_meta WHERE key = ?", (key,)
+            ).fetchone()
+            return row["value"] if row else None
+        except sqlite3.OperationalError:
+            return None
+
+    def meta_set(self, key: str, value: str) -> None:
+        """Write an arbitrary key-value pair to schema_meta."""
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_meta (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            INSERT INTO schema_meta(key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        self._conn.commit()
+
     def get_entity(self, entity_id: str) -> dict[str, Any] | None:
         row = self._conn.execute(
             "SELECT * FROM entities WHERE id = ?", (entity_id,)
@@ -280,31 +320,104 @@ class GraphStore:
         return [self._row_to_dict(r) for r in rows]
 
     def search_fts(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Full-text search with progressive fallbacks for recall.
+
+        Tries, in order: FTS5 → LIKE substring → token-AND → token-OR.
+        At each step, if only rationale/doc entities are found, continues
+        to the next fallback to find real code entities as well.
+        """
+        results: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def _add(row_list):
+            nonlocal seen_ids
+            for r in row_list:
+                eid = r["id"] if isinstance(r, dict) else r[0]
+                if eid not in seen_ids:
+                    seen_ids.add(eid)
+                    results.append(self._row_to_dict(r) if hasattr(r, "keys") else r)
+
+        def _code_count(rows):
+            return sum(
+                1 for r in rows
+                if (r["type"] if isinstance(r, dict) else getattr(r, "type", "rationale")) == "code"
+            )
+
+        def _have_code():
+            return sum(1 for r in results if r.get("type") == "code") > 0
+
+        # 1. FTS5
         if self._has_fts5:
-            # Escape FTS5 syntax characters so user search terms are
-            # treated as literal text rather than FTS5 operators.
             escaped = _escape_fts5_query(query)
             try:
                 rows = self._conn.execute(
-                    """
-                    SELECT e.* FROM entities e
-                    JOIN entity_fts fts ON e.rowid = fts.rowid
-                    WHERE entity_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
+                    """SELECT e.* FROM entities e
+                       JOIN entity_fts fts ON e.rowid = fts.rowid
+                       WHERE entity_fts MATCH ?
+                       ORDER BY rank LIMIT ?""",
                     (escaped, limit),
                 ).fetchall()
-                if rows:
-                    return [self._row_to_dict(r) for r in rows]
+                _add(rows)
             except sqlite3.OperationalError:
                 pass
-        pattern = f"%{query}%"
-        rows = self._conn.execute(
-            "SELECT * FROM entities WHERE name LIKE ? LIMIT ?",
-            (pattern, limit),
-        ).fetchall()
-        return [self._row_to_dict(r) for r in rows]
+
+        # 2. LIKE substring (always run if FTS5 didn't find code entities)
+        if not _have_code():
+            pattern = f"%{query}%"
+            rows = self._conn.execute(
+                """SELECT * FROM entities
+                   WHERE name LIKE ? OR docstring LIKE ?
+                   ORDER BY CASE WHEN name LIKE ? THEN 0 ELSE 1 END
+                   LIMIT ?""",
+                (pattern, pattern, pattern, limit),
+            ).fetchall()
+            _add(rows)
+
+        # 3. Token-level fallbacks for naming convention mismatches
+        tokens = [t.lower() for t in query.replace("_", " ").split() if len(t) > 1]
+        if len(tokens) > 1 and not _have_code():
+            # AND-fallback: all tokens must appear
+            rows = self._conn.execute(
+                """SELECT * FROM entities
+                   WHERE {conditions}
+                   ORDER BY name LIKE ? DESC
+                   LIMIT ?""".format(
+                    conditions=" AND ".join(
+                        "(LOWER(name) LIKE ? OR LOWER(docstring) LIKE ?)"
+                        for _ in tokens
+                    )
+                ),
+                [
+                    p for t in tokens for p in (f"%{t}%", f"%{t}%")
+                ] + [f"%{query}%", limit],
+            ).fetchall()
+            _add(rows)
+
+            # OR-fallback: match ANY token, ranked by match count
+            if not _have_code():
+                rows = self._conn.execute(
+                    """SELECT * FROM entities
+                       WHERE {conditions}
+                       ORDER BY ({score}) DESC
+                       LIMIT ?""".format(
+                        conditions=" OR ".join(
+                            "(LOWER(name) LIKE ? OR LOWER(docstring) LIKE ?)"
+                            for _ in tokens
+                        ),
+                        score=" + ".join(
+                            "(CASE WHEN LOWER(name) LIKE ? OR LOWER(docstring) LIKE ? THEN 1 ELSE 0 END)"
+                            for _ in tokens
+                        ),
+                    ),
+                    [
+                        p for t in tokens for p in (f"%{t}%", f"%{t}%")
+                    ] + [
+                        p for t in tokens for p in (f"%{t}%", f"%{t}%")
+                    ] + [limit],
+                ).fetchall()
+                _add(rows)
+
+        return results[:limit]
 
     def get_top_by_centrality(self, limit: int = 10, community: str | None = None) -> list[dict[str, Any]]:
         if community:
@@ -343,6 +456,13 @@ class GraphStore:
         self._closed = True
         self._conn.close()
 
+    def warnings(self) -> list[str]:
+        """Return accumulated non-fatal errors (JSON parse, FTS5 triggers, etc.)."""
+        w: list[str] = list(self._sql_errors)
+        if self._fts_trigger_error:
+            w.append(self._fts_trigger_error)
+        return w
+
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         d = dict(row)
         for field in ("intents", "metadata", "central_nodes"):
@@ -353,7 +473,7 @@ class GraphStore:
                     # Keep the raw string; accumulate the error so callers
                     # can detect corruption without crashing.
                     key = f"{field}:{d.get('id', '?')}"
-                    self._json_errors.add(key)
+                    self._sql_errors.append(key)
         return d
 
 

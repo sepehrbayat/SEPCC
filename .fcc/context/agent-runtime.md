@@ -12,3 +12,4 @@
 - Do not rewrite explicit slash commands; let them pass through unchanged.
 - Optional plugins must follow `.fcc/plugin-policy.yml`.
 - Ralph Loop is optional: use only when configured, bounded, test-verifiable, and capped by max iterations.
+- Knowledge graph (fcc-graph MCP): 9 tools available — `fcc_graph_search`, `fcc_graph_neighbors`, `fcc_graph_impact`, `fcc_graph_path`, `fcc_graph_god_nodes`, `fcc_graph_community`, `fcc_graph_entity`, `fcc_graph_stats`, `fcc_graph_explain`. Use them BEFORE reading files: search for entities first, check impact before refactoring, explain before editing unfamiliar code, check stats/staleness before trusting the graph.

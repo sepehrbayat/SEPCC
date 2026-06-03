@@ -31,6 +31,10 @@ def test_full_graph_lifecycle(tmp_path: Path) -> None:
              "type": "CALLS", "confidence": "EXTRACTED"},
             {"source": "src/main.py::main", "target": "src/ui.py::render",
              "type": "CALLS", "confidence": "EXTRACTED"},
+            {"source": "src/lib.py::helper", "target": "src/main.py::main",
+             "type": "CALLS", "confidence": "EXTRACTED"},
+            {"source": "src/ui.py::render", "target": "src/main.py::main",
+             "type": "CALLS", "confidence": "EXTRACTED"},
         ],
         "communities": [
             {"id": "core", "label": "Core Logic", "size": 2, "central_nodes": ["main"]},
@@ -41,7 +45,7 @@ def test_full_graph_lifecycle(tmp_path: Path) -> None:
 
     store = load_graph(tmp_path)
     assert store.entity_count() == 3
-    assert store.relation_count() == 2
+    assert store.relation_count() == 4
     assert store.community_count() == 2
     assert store.version() is not None
 

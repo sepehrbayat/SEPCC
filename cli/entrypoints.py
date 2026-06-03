@@ -32,7 +32,7 @@ from cli.session_registry import (
     resolve_project_root,
 )
 from cli.session_resume import build_resume_plan, choose_resume_session
-from config.paths import config_dir_path, legacy_env_paths, managed_env_path
+from config.paths import config_dir_path, managed_env_path
 from config.settings import Settings, get_settings
 from core.context.handoff import regenerate_handoff
 
@@ -162,21 +162,9 @@ def init() -> None:
 
 
 def _migrate_legacy_env_if_missing() -> Path | None:
-    """Copy a legacy user env into the managed config path when absent."""
-
+    """Check that the managed env file exists (legacy migration removed v2.1+)."""
     env_file = managed_env_path()
-    if env_file.exists():
-        return None
-
-    # TODO: Remove after the ~/.fcc/.env migration has had a release cycle.
-    for legacy_env in legacy_env_paths():
-        if not legacy_env.is_file():
-            continue
-        env_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(legacy_env, env_file)
-        return legacy_env
-
-    return None
+    return env_file if env_file.exists() else None
 
 
 def _claude_child_env(

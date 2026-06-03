@@ -4,8 +4,6 @@ from pathlib import Path
 
 FCC_CONFIG_DIRNAME = ".fcc"
 FCC_ENV_FILENAME = ".env"
-LEGACY_REPO_DIRNAME = "free-claude-code"
-LEGACY_XDG_CONFIG_DIRNAME = ".config"
 CLAUDE_WORKSPACE_DIRNAME = "agent_workspace"
 FCC_LOGS_DIRNAME = "logs"
 SERVER_LOG_FILENAME = "server.log"
@@ -21,16 +19,6 @@ def managed_env_path() -> Path:
     """Return the default user-managed env file path."""
 
     return config_dir_path() / FCC_ENV_FILENAME
-
-
-def legacy_env_paths() -> tuple[Path, ...]:
-    """Return legacy user env paths that can be migrated to ~/.fcc/.env."""
-
-    home = Path.home()
-    return (
-        home / LEGACY_REPO_DIRNAME / FCC_ENV_FILENAME,
-        home / LEGACY_XDG_CONFIG_DIRNAME / LEGACY_REPO_DIRNAME / FCC_ENV_FILENAME,
-    )
 
 
 def default_claude_workspace_path() -> Path:

@@ -11,3 +11,4 @@ You research FCC-adjacent tooling and current docs.
 - Check whether optional plugins overlap MemSearch, Token Savior, or FCC hooks.
 - Do not recommend new defaults unless they have a concrete FCC reliability role.
 - Return source-linked conclusions and implementation implications.
+- Use fcc_graph_search and fcc_graph_explain to find relevant code entities before reading files.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -50,6 +51,10 @@ class AgentRuntimeDoctorReport:
     memory_owner_valid: bool
     token_savior_baseline: bool
     ralph_loop_policy_valid: bool
+    graph_healthy: bool = True
+    graph_issues: list[str] = field(default_factory=list)
+    graph_hooks_installed: bool = False
+    graph_benchmark: dict[str, Any] | None = None
     autofixed: list[str] = field(default_factory=list)
     issues: list[str] = field(default_factory=list)
 
@@ -65,6 +70,10 @@ class AgentRuntimeDoctorReport:
             "memory_owner_valid": self.memory_owner_valid,
             "token_savior_baseline": self.token_savior_baseline,
             "ralph_loop_policy_valid": self.ralph_loop_policy_valid,
+            "graph_healthy": self.graph_healthy,
+            "graph_issues": self.graph_issues,
+            "graph_hooks_installed": self.graph_hooks_installed,
+            "graph_benchmark": self.graph_benchmark,
             "autofixed": self.autofixed,
             "issues": self.issues,
         }
@@ -118,6 +127,14 @@ def run_agent_runtime_doctor(
 
     graph_issues = _check_graph_health(root)
     issues.extend(graph_issues)
+    graph_healthy = len(graph_issues) == 0
+    graph_hooks_installed = _graph_hooks_installed(root)
+    if not graph_hooks_installed:
+        issues.append(
+            "Graphify git hooks not installed. Graph won't auto-rebuild on commit. "
+            "Run: graphify hook install"
+        )
+    graph_benchmark = _graph_benchmark(root)
 
     report = AgentRuntimeDoctorReport(
         runtime_contract_exists=(root / RUNTIME_CONTRACT_RELATIVE).is_file(),
@@ -132,6 +149,10 @@ def run_agent_runtime_doctor(
         memory_owner_valid=memory_owner_valid,
         token_savior_baseline=token_savior_baseline,
         ralph_loop_policy_valid=ralph_loop_policy_valid,
+        graph_healthy=graph_healthy,
+        graph_issues=graph_issues,
+        graph_hooks_installed=graph_hooks_installed,
+        graph_benchmark=graph_benchmark,
         autofixed=autofixed,
         issues=issues,
     )
@@ -145,12 +166,148 @@ def _check_graph_health(root: Path) -> list[str]:
         return [
             "No knowledge graph found. Run: fcc-bootstrap-context --install-graphify"
         ]
+    issues: list[str] = []
     size_mb = graph_json.stat().st_size / (1024 * 1024)
     if size_mb > 50:
-        return [
-            f"graph.json is {size_mb:.0f}MB — may cause slow loads."
-        ]
-    return []
+        issues.append(
+            f"graph.json is {size_mb:.0f}MB — exceeds 50MB load limit. "
+            "Exclude generated/template directories and rebuild."
+        )
+    # Multigraph edge-collapse diagnosis
+    multigraph_issues = _graph_multigraph_check(root, graph_json)
+    issues.extend(multigraph_issues)
+    # Staleness check
+    staleness = _graph_staleness_check(root)
+    if staleness:
+        issues.append(staleness)
+    return issues
+
+
+def _graph_staleness_check(root: Path) -> str | None:
+    """Check if the graph commit matches HEAD."""
+    try:
+        from core.graph.loader import load_graph
+        store = load_graph(root)
+        built_at = store.meta_get("built_at_commit")
+        current = _git_head_commit()
+        store.close()
+        if built_at and current and built_at != current:
+            return (
+                f"Graph built from commit {built_at[:8]} but HEAD is {current[:8]}. "
+                "Run: graphify update ."
+            )
+    except Exception:
+        pass
+    return None
+
+
+def _graph_multigraph_check(root: Path, graph_json: Path) -> list[str]:
+    """Run graphify diagnose multigraph if available."""
+    if not shutil.which("graphify"):
+        return []
+    try:
+        result = subprocess.run(
+            ["graphify", "diagnose", "multigraph", "--graph", str(graph_json), "--json"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return []
+        data = json.loads(result.stdout)
+        if not isinstance(data, dict):
+            return []
+        issues: list[str] = []
+        collapse_risk = data.get("collapse_risk")
+        if isinstance(collapse_risk, str) and collapse_risk.lower() in ("high", "medium"):
+            edge_count = data.get("same_endpoint_edge_count", "?")
+            issues.append(
+                f"Multigraph edge collapse risk: {collapse_risk} "
+                f"({edge_count} same-endpoint edge pairs). "
+                "Consider running graphify with --directed."
+            )
+        return issues
+    except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+        return []
+
+
+def _graph_hooks_installed(root: Path) -> bool:
+    """Check if graphify git hooks are present."""
+    hooks_dir = root / ".git" / "hooks"
+    if not hooks_dir.is_dir():
+        return False  # Not a git repo (or worktree), skip
+    # graphify installs post-commit and post-checkout hooks
+    post_commit = hooks_dir / "post-commit"
+    post_checkout = hooks_dir / "post-checkout"
+    if not post_commit.is_file() or not post_checkout.is_file():
+        return False
+    # Verify they reference graphify
+    try:
+        pc_text = post_commit.read_text(encoding="utf-8", errors="replace")
+        co_text = post_checkout.read_text(encoding="utf-8", errors="replace")
+        return "graphify" in pc_text.lower() and "graphify" in co_text.lower()
+    except OSError:
+        return False
+
+
+def _graph_benchmark(root: Path) -> dict[str, Any] | None:
+    """Run graphify benchmark and return token savings data."""
+    graph_json = root / "graphify-out" / "graph.json"
+    alt_graph = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        graph_json = alt_graph
+    if not graph_json.is_file() or not shutil.which("graphify"):
+        # Fall back to coarse estimate from stored counts
+        try:
+            from core.graph.loader import load_graph
+            store = load_graph(root)
+            n_nodes = store.meta_get("source_node_count")
+            n_edges = store.meta_get("source_edge_count")
+            store.close()
+            if n_nodes and n_edges:
+                return {
+                    "nodes": int(n_nodes),
+                    "edges": int(n_edges),
+                    "estimated_reduction": f"~{max(10, int(n_nodes) // 150)}x",
+                    "source": "metadata (run graphify benchmark for exact figures)",
+                }
+        except Exception:
+            pass
+        return None
+    try:
+        result = subprocess.run(
+            ["graphify", "benchmark", str(graph_json)],
+            cwd=str(root),
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode != 0:
+            return None
+        output = result.stdout
+        # Parse key lines from graphify benchmark output
+        data: dict[str, Any] = {"source": "graphify benchmark"}
+        for line in output.splitlines():
+            line = line.strip()
+            if "Corpus:" in line:
+                # "Corpus: 349,650 words → ~466,200 tokens (naive)"
+                import re as _re
+                m = _re.search(r"([\d,]+)\s+words.*?([\d,]+)\s+tokens", line)
+                if m:
+                    data["corpus_words"] = int(m.group(1).replace(",", ""))
+                    data["naive_tokens"] = int(m.group(2).replace(",", ""))
+            elif "nodes" in line.lower() and "edges" in line.lower():
+                m = _re.search(r"([\d,]+)\s+nodes.*?([\d,]+)\s+edges", line)
+                if m:
+                    data["nodes"] = int(m.group(1).replace(",", ""))
+                    data["edges"] = int(m.group(2).replace(",", ""))
+            elif "Reduction:" in line:
+                # "Reduction: 46.1x fewer tokens per query"
+                m = _re.search(r"([\d.]+)x", line)
+                if m:
+                    data["token_reduction"] = f"{m.group(1)}x"
+        return data if len(data) > 1 else None
+    except (subprocess.SubprocessError, OSError):
+        return None
 
 
 def _copy_missing_runtime_files(project_root: Path) -> list[str]:
@@ -343,3 +500,17 @@ def _strip_yaml_comments(text: str) -> str:
             continue
         lines.append(line.split("#", 1)[0].rstrip())
     return "\n".join(lines)
+
+
+def _git_head_commit() -> str | None:
+    """Return the current HEAD commit hash, or None if not in a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None

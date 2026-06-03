@@ -222,3 +222,98 @@ def test_version_tracking(store: GraphStore) -> None:
     assert store.version() == "abc123def"
     store.set_version("new456")
     assert store.version() == "new456"
+
+
+def test_empty_intents_preserved_round_trip(store: GraphStore) -> None:
+    """B9: Empty intents list must survive round-trip as [], not become NULL."""
+    store.insert_entity({
+        "id": "mod.py::E",
+        "name": "E",
+        "type": "class",
+        "intents": [],  # Explicitly empty
+    })
+    store.commit()
+    e = store.get_entity("mod.py::E")
+    assert e is not None
+    assert e["intents"] == [], (
+        f"Empty intents should be [] but got {e['intents']!r}"
+    )
+
+
+def test_fts5_minus_operator_escaped(store: GraphStore) -> None:
+    """B10: FTS5 - (NOT operator) must be escaped to avoid 're-export' → 're NOT export'."""
+    store.insert_entity({
+        "id": "lib.py::re_export",
+        "name": "re-export",
+        "type": "function",
+        "docstring": "Re-exports module symbols",
+    })
+    store.insert_entity({
+        "id": "lib.py::nothing",
+        "name": "nothing_related",
+        "type": "function",
+        "docstring": "Completely unrelated to exports",
+    })
+    store.commit()
+    results = store.search_fts("re-export", limit=10)
+    assert len(results) >= 1, "Search for 're-export' returned no results"
+    assert results[0]["name"] == "re-export", (
+        f"Expected 're-export' but got {results[0]['name']}"
+    )
+
+
+def test_fts5_like_fallback_searches_docstring(store: GraphStore) -> None:
+    """B11: LIKE fallback should find entities by docstring, not just name."""
+    store.insert_entity({
+        "id": "x.py::Handler",
+        "name": "Handler",
+        "type": "class",
+        "docstring": "Manages OAuth2 token lifecycle",
+    })
+    store.commit()
+    # If FTS5 available, this tests FTS5. Otherwise tests LIKE fallback.
+    results = store.search_fts("OAuth2", limit=10)
+    assert len(results) >= 1, "Search should find entity by docstring content"
+
+
+def test_insert_entity_skips_empty_id(store: GraphStore) -> None:
+    """Entities with empty/null IDs must be silently skipped."""
+    store.insert_entity({"id": "", "name": "Empty"})
+    store.insert_entity({"id": None, "name": "Null"})
+    store.commit()
+    assert store.entity_count() == 0
+
+
+def test_fts5_or_fallback_for_partial_token_match(store: GraphStore) -> None:
+    """OR-fallback: search with 2+ tokens where only one matches must still return results."""
+    store.insert_entity({
+        "id": "providers::circuit_failure",
+        "name": "PROVIDER_CIRCUIT_FAILURE_THRESHOLD",
+        "type": "code",
+        "docstring": "Number of failures before opening circuit",
+    })
+    store.insert_entity({
+        "id": "providers::cooldown",
+        "name": "PROVIDER_CIRCUIT_COOLDOWN_SECONDS",
+        "type": "code",
+        "docstring": "Circuit cooldown period",
+    })
+    store.insert_entity({
+        "id": "other::unrelated",
+        "name": "completely_unrelated",
+        "type": "code",
+        "docstring": "Nothing at all to do with this topic",
+    })
+    store.commit()
+
+    # "circuit_breaker" → tokens ["circuit", "breaker"]
+    # "breaker" matches nothing in the test data
+    # "circuit" matches both provider entities
+    results = store.search_fts("circuit_breaker", limit=10)
+    names = [r["name"] for r in results]
+    assert "PROVIDER_CIRCUIT_FAILURE_THRESHOLD" in names, (
+        f"OR-fallback should match 'circuit' token, got: {names}"
+    )
+    assert "PROVIDER_CIRCUIT_COOLDOWN_SECONDS" in names
+    # "completely_unrelated" should NOT appear (no token match at all)
+    assert "completely_unrelated" not in names

@@ -35,6 +35,7 @@ flag style preferences (whitespace, naming taste, formatting).
   type annotations that contradict actual usage.
 - Null / edge cases: unhandled None, empty collections, boundary values.
 - Race conditions: shared mutable state, missing locks, TOCTOU patterns.
+- Use fcc_graph_impact on every changed file to understand blast radius before evaluating correctness.
 - Cross-reference claims in the transcript against the actual code.
 - Flag if no tests ran (`test_results` is empty or "no tests").
 

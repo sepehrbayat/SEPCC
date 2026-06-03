@@ -11,18 +11,18 @@
 - Keep this file for durable project facts that should be safe to share with future sessions.
 
 ## Current State
-- assistant: **H1 + H2** — Fix lockfile check and cancellation flush in `debugger_pipeline_context` and `detect_task_transition`:
-- assistant: **G4** — Add `id` validation to `insert_entity`:
-- assistant: **Issue 3** — Add boilerplate filtering to `_shared.summarize_transcript`:
-- assistant: Provider request timed out after 300s.
-- Request ID: req_f188389e7896
+- | `scripts/graph/mcp_server.py` | B2: cached store, B22: missing/corrupted messages, B23: param validation, B24: parse error responses |
+- | `cli/context_doctor.py` | B25: threshold message |
+- | `tests/graph/test_*.py` | 22 new tests covering all 31 bugs |
+- user: fix the last issue
+- assistant: Now let me test this with `circuit_breaker` specifically:
 
 ## Decisions
-- Persistent memory owner: MemSearch
-- Code retrieval owner: Token Savior
-- UserPromptSubmit hooks may add enhanced prompt context and visible status, but must not rewrite explicit slash commands
 - The full graph is never rebuilt from scratch unless explicitly requested
 - This is the critical design decision
+- file counts, decision extraction from task 1 transcript
+- The main session never knows it's being monitored
+- user: Given your understanding of the project and of yourself as an agent, you’re in the best position to judge it and, in my opinion, you should choose the best strategy yourself
 
 ## Next Steps
 - Run /verify-context before major edits.
