@@ -1,0 +1,30 @@
+# serializer version: 1
+# name: TestGraphStoreSnapshot.test_top5_god_nodes_snapshot[top5_production_god_nodes]
+  list([
+    tuple(
+      'Settings',
+      1.0,
+      201,
+    ),
+    tuple(
+      'MessagesRequest',
+      0.552,
+      111,
+    ),
+    tuple(
+      'Message',
+      0.517,
+      104,
+    ),
+    tuple(
+      'InvalidRequestError',
+      0.502,
+      101,
+    ),
+    tuple(
+      'ProviderConfig',
+      0.428,
+      86,
+    ),
+  ])
+# ---

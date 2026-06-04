@@ -79,6 +79,12 @@ dev = [
     "pytest-xdist>=3.8.0",
     "playwright>=1.60.0",
     "pytest-playwright>=0.8.0",
+    "pytest-randomly>=3.16",
+    "freezegun>=1.5",
+    "pytest-mock>=3.14",
+    "syrupy>=4.8",
+    "hypothesis>=6.130",
+    "mutmut>=3.0",
 ]
 
 [tool.ruff]
@@ -115,7 +121,7 @@ skip-magic-trailing-comma = false
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "-n auto"
+addopts = "-n auto --randomly-seed=last"
 testpaths = ["tests"]
 markers = [
     "live: opt-in local smoke tests that can touch real services",
