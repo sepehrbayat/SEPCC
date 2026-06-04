@@ -367,6 +367,73 @@ class GraphQuery:
                 return False  # At least one production dependent
         return True  # All dependents are test files
 
+    def is_usage_site(self, entity_id: str) -> bool:
+        """Return True when an entity is a usage site, not a definition.
+
+        A *definition site* is the most-authoritative entity for a given
+        name — the one with the highest in-degree across ALL files.
+        All other entities sharing that name are *usage sites*: import
+        references, type annotations, and call sites.
+
+        Uses a direct SQL query to find the authoritative entity,
+        avoiding the top-N limitation of search().
+        """
+        entity = self._store.get_entity(entity_id)
+        if entity is None:
+            return True
+        name = entity.get("name", "")
+        if not name:
+            return True
+        efile = entity.get("file") or ""
+
+        # Find the entity with the highest in_degree for this name
+        row = self._store._conn.execute(
+            """SELECT id, file FROM entities
+               WHERE name = ? AND type = 'code'
+               ORDER BY COALESCE(in_degree, 0) DESC LIMIT 1""",
+            (name,),
+        ).fetchone()
+
+        if row is None:
+            return False
+
+        # If THIS entity is the most-authoritative one, it's a definition
+        if row["id"] == entity_id:
+            return False
+
+        # If this entity shares the same file as the definition,
+        # it's likely a real entity in the definition file
+        definition_file = row["file"] or ""
+        if definition_file and efile == definition_file:
+            return False
+
+        return True
+
+    def god_nodes_excluding_usage_sites(
+        self, top_n: int = 10, community: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """god_nodes() filtered to only definition sites, not usage sites.
+
+        This is the default-safe method for architectural analysis.
+        Usage sites (import references) inflate entity counts and
+        produce false "undocumented" flags — this filters them out.
+        """
+        # Get a larger pool, filter, then trim
+        nodes = self._store.get_top_by_centrality(
+            limit=top_n * 5, community=community,
+        )
+        for node in nodes:
+            node["connection_count"] = self._store.connection_count(node["id"])
+
+        # Filter: exclude builtins, test-only, AND usage sites
+        nodes = [
+            n for n in nodes
+            if n.get("file") and not _is_builtin_entity(n)
+            and not self.is_test_only(n["id"])
+            and not self.is_usage_site(n["id"])
+        ]
+        return nodes[:top_n]
+
     def search(self, query: str, top_n: int = 10) -> list[dict[str, Any]]:
         return self._store.search_fts(query, limit=top_n)
 
