@@ -596,6 +596,82 @@ class GraphQuery:
 
         return result
 
+    def inspect(self, entity_id: str) -> dict[str, Any]:
+        """Rich entity inspection — what is this and what does it do?
+
+        Returns the entity with its docstring, signature, connection counts,
+        community context, and immediate dependencies/dependents — everything
+        needed to understand it without opening the source file.
+
+        This bridges the gap between graph structure and code semantics.
+        """
+        entity = self._store.get_entity(entity_id)
+        if entity is None:
+            return {"error": "entity_not_found", "entity_id": entity_id}
+
+        # Parse metadata (stored as JSON by enrich module)
+        meta = entity.get("metadata")
+        if isinstance(meta, str):
+            import json as _json
+            try:
+                meta = _json.loads(meta)
+            except (_json.JSONDecodeError, TypeError):
+                meta = {}
+        elif meta is None:
+            meta = {}
+
+        # Get connections
+        in_deg = len(self._store.get_incoming_relations(entity_id))
+        out_deg = len(self._store.get_outgoing_relations(entity_id))
+        community_id = entity.get("community")
+
+        # Get community peers
+        peers: list[str] = []
+        if community_id:
+            peer_entities = self._store.get_entities_by_community(community_id)
+            peers = [
+                _entity_name(p) for p in peer_entities
+                if p["id"] != entity_id
+            ][:10]
+
+        # Get key direct dependents
+        incoming = self._store.get_incoming_relations(entity_id)
+        depon: list[str] = []
+        depon_seen: set[str] = set()
+        for rel in incoming[:12]:
+            dep_ent = self._store.get_entity(rel["source_id"])
+            if dep_ent and dep_ent["id"] not in depon_seen:
+                depon_seen.add(dep_ent["id"])
+                depon.append(_entity_name(dep_ent))
+
+        # Key dependencies
+        outgoing = self._store.get_outgoing_relations(entity_id)
+        deps: list[str] = []
+        deps_seen: set[str] = set()
+        for rel in outgoing[:12]:
+            dep_ent = self._store.get_entity(rel["target_id"])
+            if dep_ent and dep_ent["id"] not in deps_seen:
+                deps_seen.add(dep_ent["id"])
+                deps.append(_entity_name(dep_ent))
+
+        return {
+            "entity": entity,
+            "docstring": entity.get("docstring") or meta.get("docstring") or "",
+            "signature": meta.get("signature") or f"{meta.get('kind', 'unknown')}: {entity.get('name', entity_id)}",
+            "kind": meta.get("kind", entity.get("type", "unknown")),
+            "decorators": meta.get("decorators", []),
+            "bases": meta.get("bases", []),
+            "file": entity.get("file"),
+            "line": entity.get("line"),
+            "centrality": entity.get("centrality"),
+            "in_degree": in_deg,
+            "out_degree": out_deg,
+            "community": community_id,
+            "community_peers": peers,
+            "depended_on_by": depon,
+            "depends_on": deps,
+        }
+
 
 # ── Helpers ────────────────────────────────────────────────────────────
 

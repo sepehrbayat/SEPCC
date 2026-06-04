@@ -79,6 +79,8 @@ def _tools_list(req_id: object) -> dict:
          "inputSchema": {"type": "object", "properties": {"entity_id": {"type": "string"}}, "required": ["entity_id"]}},
         {"name": "fcc_graph_explain", "description": "Plain-language explanation of an entity — what it is, what it depends on, what depends on it, and its community context. No LLM needed.",
          "inputSchema": {"type": "object", "properties": {"entity_id": {"type": "string"}}, "required": ["entity_id"]}},
+        {"name": "fcc_graph_inspect", "description": "Rich entity inspection with docstrings, signatures, connections — understand what an entity does without opening the source file.",
+         "inputSchema": {"type": "object", "properties": {"entity_id": {"type": "string"}}, "required": ["entity_id"]}},
         {"name": "fcc_graph_stats", "description": "Return graph summary statistics (entity/relation/community/counts, commit staleness, needs_update flag).",
          "inputSchema": {"type": "object", "properties": {}, "required": []}},
     ]
@@ -93,6 +95,7 @@ def _tools_call(params: dict, req_id: object) -> dict:
         "fcc_graph_search", "fcc_graph_neighbors", "fcc_graph_impact",
         "fcc_graph_path", "fcc_graph_god_nodes", "fcc_graph_community",
         "fcc_graph_entity", "fcc_graph_stats", "fcc_graph_explain",
+        "fcc_graph_inspect",
     }
     if tool_name not in known_tools:
         return _error(req_id, -32601, f"Unknown tool: {tool_name}")
@@ -108,6 +111,7 @@ def _tools_call(params: dict, req_id: object) -> dict:
         "fcc_graph_entity": ("entity_id",),
         "fcc_graph_stats": (),
         "fcc_graph_explain": ("entity_id",),
+        "fcc_graph_inspect": ("entity_id",),
     }
     for param in _REQUIRED_PARAMS.get(tool_name, ()):
         if param not in arguments:
@@ -144,6 +148,7 @@ def _tools_call(params: dict, req_id: object) -> dict:
         "fcc_graph_entity": lambda: query.entity(arguments["entity_id"]),
         "fcc_graph_stats": lambda: query.stats(),
         "fcc_graph_explain": lambda: query.explain(arguments["entity_id"]),
+        "fcc_graph_inspect": lambda: query.inspect(arguments["entity_id"]),
     }
     result = handler_map[tool_name]()
     return {"jsonrpc": "2.0", "id": req_id, "result": {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}}

@@ -79,11 +79,18 @@ def build_task_injection(
         line = m.get("line")
         loc = f"{file}:{line}" if line else file
         conns = graph._store.connection_count(m["id"])
-        god = " — god node" if m.get("centrality", 0) > 0.7 else ""
+        god = " — god node" if (m.get("centrality") or 0) > 0.7 else ""
         community = m.get("community", "")
         lines.append(f"  • {m['name']} ({loc}){god}, {conns} connections")
         if community:
             lines.append(f"    Community: {community}")
+        # Include docstring if available (from semantic enrichment)
+        doc = m.get("docstring")
+        if doc and isinstance(doc, str) and doc.strip():
+            # Truncate long docstrings to first sentence
+            brief = doc.split(".")[0].strip()[:120]
+            if brief:
+                lines.append(f"    {brief}.")
     result = "\n".join(lines)
     if len(result) > token_budget:
         result = result[:token_budget - 3] + "..."

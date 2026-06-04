@@ -116,6 +116,9 @@ def load_graph(root: Path) -> GraphStore:
         # Save entity snapshot for diff-based change detection
         _save_entity_snapshot(nodes, edges, store)
 
+        # Enrich entities with docstrings and signatures from source
+        _run_enrichment(root, store)
+
         return store
     except Exception:
         store.close()
@@ -217,6 +220,20 @@ def _save_entity_snapshot(
     store.meta_set("entity_snapshot", _json.dumps(snapshot, separators=(",", ":")))
     store.meta_set("entity_snapshot_count", str(len(snapshot)))
     store.meta_set("edge_snapshot_count", str(len(edges)))
+
+
+def _run_enrichment(root: Path, store: GraphStore) -> None:
+    """Run semantic enrichment after graph load, best-effort.
+
+    Failures in enrichment are logged but never fatal — the graph is
+    still usable without docstrings.
+    """
+    try:
+        from core.graph.enrich import enrich_store
+        enriched = enrich_store(root, store)
+        store.meta_set("enrichment_count", str(enriched))
+    except Exception:
+        pass  # Enrichment is optional
 
 
 def _compute_centrality(
