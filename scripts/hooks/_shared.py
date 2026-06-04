@@ -417,6 +417,7 @@ def _fallback_runtime_contract() -> str:
     return "\n".join(
         [
             "# FCC Agent Runtime",
+            "- **MANDATORY**: .fcc/context/quality-gates.md is a binding quality contract — read and apply it before any task (pre-task gates, product-centered rules, red flags, definition of done, golden rules).",
             "- FCC is the provider/router; do not add another routing proxy.",
             "- Trust SessionStart context, then .fcc/context/handoff.md.",
             "- Durable local facts belong in CLAUDE.local.md.",

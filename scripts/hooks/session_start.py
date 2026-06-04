@@ -70,6 +70,7 @@ def main() -> None:
         "CLAUDE.md",
         "CLAUDE.local.md",
         ".fcc/context/handoff.md",
+        ".fcc/context/quality-gates.md",
     ):
         content = compact_lines(read_text(root / rel_path), max_lines=12, max_chars=900)
         if content:

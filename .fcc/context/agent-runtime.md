@@ -1,5 +1,6 @@
 # FCC Agent Runtime
 
+- **MANDATORY**: `.fcc/context/quality-gates.md` is a binding quality contract.  Read and apply it before any task — it defines pre-task gates, product-centered rules, red flags, confidence requirements, definition of done, and golden rules.  If the quality gates are missing from this project, request them before proceeding.
 - FCC is the provider/router layer; do not add another routing proxy.
 - Trust SessionStart injected context first, then `.fcc/context/handoff.md`.
 - Durable local facts belong in `CLAUDE.local.md`; committed rules belong in `CLAUDE.md`.
