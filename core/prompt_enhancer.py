@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import json as _json_std
 from loguru import logger
 
 from core.trace import trace_event
@@ -395,7 +396,7 @@ def enhance_prompt_sync(
     max_output_chars: int = 2000,
 ) -> PromptEnhancementResult:
     """Synchronous wrapper for standalone hook scripts."""
-    return asyncio.run(
+    result = asyncio.run(
         enhance_prompt_with_metadata(
             prompt,
             workspace_path,
@@ -406,3 +407,29 @@ def enhance_prompt_sync(
             max_output_chars=max_output_chars,
         )
     )
+    _persist_enhancement_stats(workspace_path, result)
+    return result
+
+
+def _persist_enhancement_stats(workspace_path: str, result: PromptEnhancementResult) -> None:
+    """Append a JSONL line to .fcc/prompt_stats.jsonl for observability.
+
+    This is a best-effort write — failures are silently ignored so the
+    enhancement path never breaks on stats persistence.
+    """
+    try:
+        from datetime import datetime, timezone
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": result.status,
+            "changed": result.changed,
+            "original_chars": len(result.original_prompt),
+            "enhanced_chars": len(result.enhanced_prompt),
+            "reason": result.reason,
+        }
+        stats_path = Path(workspace_path) / ".fcc" / "prompt_stats.jsonl"
+        stats_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(stats_path, "a", encoding="utf-8") as f:
+            f.write(_json_std.dumps(entry, separators=(",", ":")) + "\n")
+    except Exception:
+        pass  # Stats are optional — never break the enhancement path

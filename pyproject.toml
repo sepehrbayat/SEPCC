@@ -34,6 +34,7 @@ fcc-claude = "cli.entrypoints:launch_claude"
 fcc-bootstrap-context = "cli.bootstrap_context:main"
 fcc-context-query = "core.context.retrieval:main"
 fcc-context-store = "core.context.storage:main"
+fcc-prompts-stats = "cli.prompt_stats:main"
 
 [project.optional-dependencies]
 voice = [
