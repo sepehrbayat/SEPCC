@@ -1,4 +1,11 @@
-"""Command parsing and dispatch for messaging handlers."""
+"""Command parsing and dispatch for messaging handlers.
+
+Import-cycle note:  ``command_dispatcher → commands → handler → command_dispatcher``
+is a 3-module cycle.  ``commands.py`` only imports ``ClaudeMessageHandler`` inside
+``TYPE_CHECKING``, so the cycle is not a runtime import loop.  If you add a new
+import to ``commands.py`` or ``handler.py``, keep it type-only or restructure
+the dispatch -> command -> handler chain first.
+"""
 
 from __future__ import annotations
 
