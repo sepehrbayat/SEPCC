@@ -1,13 +1,18 @@
-"""Provider descriptors, factory, and runtime registry."""
+"""Provider descriptors, configuration, and runtime registry.
+
+Public re-exports for backward compatibility:
+  - ``ProviderHealth`` from ``providers.health``
+  - ``PROVIDER_FACTORIES``, ``ProviderFactory`` from ``providers.factories``
+"""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, MutableMapping
+from collections.abc import Iterable, MutableMapping
 from contextlib import suppress
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from loguru import logger
@@ -26,188 +31,40 @@ from providers.exceptions import (
     ServiceUnavailableError,
     UnknownProviderTypeError,
 )
+from providers.factories import PROVIDER_FACTORIES, ProviderFactory  # noqa: F401 — re-export
+from providers.health import (  # noqa: F401 — re-export
+    PROVIDER_CIRCUIT_COOLDOWN_SECONDS,
+    PROVIDER_CIRCUIT_FAILURE_THRESHOLD,
+    ProviderHealth,
+)
 from providers.model_listing import ProviderModelInfo, model_infos_from_ids
 
-ProviderFactory = Callable[[ProviderConfig, Settings], BaseProvider]
-PROVIDER_CIRCUIT_FAILURE_THRESHOLD = 2
-PROVIDER_CIRCUIT_COOLDOWN_SECONDS = 60.0
+if TYPE_CHECKING:
+    pass
 
 # Backwards-compatible name for the catalog (single source: ``config.provider_catalog``).
 PROVIDER_DESCRIPTORS: dict[str, ProviderDescriptor] = PROVIDER_CATALOG
 
 
-@dataclass(slots=True)
-class ProviderHealth:
-    """In-process health/circuit-breaker state for one provider."""
-
-    provider_id: str
-    status: str = "unknown"
-    consecutive_failures: int = 0
-    last_success_at: float | None = None
-    last_failure_at: float | None = None
-    last_error_type: str = ""
-    circuit_open_until: float | None = None
-
-    def is_available(self, now: float | None = None) -> bool:
-        now = time.time() if now is None else now
-        if self.circuit_open_until is None:
-            return True
-        if self.circuit_open_until <= now:
-            self.circuit_open_until = None
-            self.status = "unknown"
-            return True
-        return False
-
-    def snapshot(self, now: float | None = None) -> dict[str, object]:
-        now = time.time() if now is None else now
-        available = self.is_available(now)
-        status = self.status
-        if self.circuit_open_until is not None and self.circuit_open_until > now:
-            status = "circuit_open"
-        return {
-            "provider_id": self.provider_id,
-            "status": status,
-            "available": available,
-            "consecutive_failures": self.consecutive_failures,
-            "last_success_at": self.last_success_at,
-            "last_failure_at": self.last_failure_at,
-            "last_error_type": self.last_error_type,
-            "circuit_open_until": self.circuit_open_until,
-        }
+# ── Bootstrap assertion ──────────────────────────────────────────────────
 
 
-def _create_nvidia_nim(config: ProviderConfig, settings: Settings) -> BaseProvider:
-    from providers.nvidia_nim import NvidiaNimProvider
-
-    return NvidiaNimProvider(config, nim_settings=settings.nim)
-
-
-def _create_open_router(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.open_router import OpenRouterProvider
-
-    return OpenRouterProvider(config)
-
-
-def _create_mistral(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.mistral import MistralProvider
-
-    return MistralProvider(config)
+def _validate_registry_consistency() -> None:
+    """Assert provider descriptors, factories, and IDs are in sync."""
+    if set(PROVIDER_DESCRIPTORS) != set(SUPPORTED_PROVIDER_IDS) or set(
+        PROVIDER_FACTORIES
+    ) != set(SUPPORTED_PROVIDER_IDS):
+        raise AssertionError(
+            "PROVIDER_DESCRIPTORS, PROVIDER_FACTORIES, and SUPPORTED_PROVIDER_IDS are out of sync: "
+            f"descriptors={set(PROVIDER_DESCRIPTORS)!r} factories={set(PROVIDER_FACTORIES)!r} "
+            f"ids={set(SUPPORTED_PROVIDER_IDS)!r}"
+        )
 
 
-def _create_mistral_codestral(
-    config: ProviderConfig, _settings: Settings
-) -> BaseProvider:
-    from providers.codestral import CodestralProvider
-
-    return CodestralProvider(config)
+_validate_registry_consistency()
 
 
-def _create_deepseek(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.deepseek import DeepSeekProvider
-
-    return DeepSeekProvider(config)
-
-
-def _create_lmstudio(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.lmstudio import LMStudioProvider
-
-    return LMStudioProvider(config)
-
-
-def _create_llamacpp(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.llamacpp import LlamaCppProvider
-
-    return LlamaCppProvider(config)
-
-
-def _create_ollama(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.ollama import OllamaProvider
-
-    return OllamaProvider(config)
-
-
-def _create_kimi(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.kimi import KimiProvider
-
-    return KimiProvider(config)
-
-
-def _create_wafer(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.wafer import WaferProvider
-
-    return WaferProvider(config)
-
-
-def _create_opencode(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.opencode import OpenCodeProvider
-
-    return OpenCodeProvider(config)
-
-
-def _create_opencode_go(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.opencode import OpenCodeProvider
-
-    return OpenCodeProvider(config, provider_name="OPENCODE_GO")
-
-
-def _create_zai(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.zai import ZaiProvider
-
-    return ZaiProvider(config)
-
-
-def _create_fireworks(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.fireworks import FireworksProvider
-
-    return FireworksProvider(config)
-
-
-def _create_gemini(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.gemini import GeminiProvider
-
-    return GeminiProvider(config)
-
-
-def _create_groq(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.groq import GroqProvider
-
-    return GroqProvider(config)
-
-
-def _create_cerebras(config: ProviderConfig, _settings: Settings) -> BaseProvider:
-    from providers.cerebras import CerebrasProvider
-
-    return CerebrasProvider(config)
-
-
-PROVIDER_FACTORIES: dict[str, ProviderFactory] = {
-    "nvidia_nim": _create_nvidia_nim,
-    "open_router": _create_open_router,
-    "gemini": _create_gemini,
-    "deepseek": _create_deepseek,
-    "mistral": _create_mistral,
-    "mistral_codestral": _create_mistral_codestral,
-    "opencode": _create_opencode,
-    "opencode_go": _create_opencode_go,
-    "wafer": _create_wafer,
-    "kimi": _create_kimi,
-    "cerebras": _create_cerebras,
-    "groq": _create_groq,
-    "fireworks": _create_fireworks,
-    "zai": _create_zai,
-    "lmstudio": _create_lmstudio,
-    "llamacpp": _create_llamacpp,
-    "ollama": _create_ollama,
-}
-
-if set(PROVIDER_DESCRIPTORS) != set(SUPPORTED_PROVIDER_IDS) or set(
-    PROVIDER_FACTORIES
-) != set(SUPPORTED_PROVIDER_IDS):
-    raise AssertionError(
-        "PROVIDER_DESCRIPTORS, PROVIDER_FACTORIES, and SUPPORTED_PROVIDER_IDS are out of sync: "
-        f"descriptors={set(PROVIDER_DESCRIPTORS)!r} factories={set(PROVIDER_FACTORIES)!r} "
-        f"ids={set(SUPPORTED_PROVIDER_IDS)!r}"
-    )
+# ── Credential / Config helpers ──────────────────────────────────────────
 
 
 def _string_attr(settings: Settings, attr_name: str | None, default: str = "") -> str:
@@ -244,6 +101,7 @@ def _require_credential(descriptor: ProviderDescriptor, credential: str) -> None
 def build_provider_config(
     descriptor: ProviderDescriptor, settings: Settings
 ) -> ProviderConfig:
+    """Build a typed ProviderConfig from a descriptor and the application settings."""
     credential = _credential_for(descriptor, settings)
     _require_credential(descriptor, credential)
     base_url = _string_attr(
@@ -269,6 +127,7 @@ def build_provider_config(
 
 
 def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
+    """Build a provider instance from its registry id and application settings."""
     descriptor = PROVIDER_DESCRIPTORS.get(provider_id)
     if descriptor is None:
         supported = "', '".join(PROVIDER_DESCRIPTORS)
@@ -281,6 +140,9 @@ def create_provider(provider_id: str, settings: Settings) -> BaseProvider:
     if factory is None:
         raise AssertionError(f"Unhandled provider descriptor: {provider_id}")
     return factory(config, settings)
+
+
+# ── Model validation helpers ─────────────────────────────────────────────
 
 
 def _format_provider_query_failures(
@@ -349,8 +211,19 @@ def _log_model_discovery_failure(
     )
 
 
+# ── ProviderRegistry ─────────────────────────────────────────────────────
+
+
 class ProviderRegistry:
-    """Cache and clean up provider instances by provider id."""
+    """Runtime cache for provider instances, model metadata, and health state.
+
+    Responsibilities:
+      - Lazy-create and cache provider instances by id
+      - Track circuit-breaker health per provider
+      - Cache upstream model lists for instant API responses
+      - Validate configured models against upstream on startup
+      - Graceful cleanup of all cached resources
+    """
 
     def __init__(self, providers: MutableMapping[str, BaseProvider] | None = None):
         self._providers = providers if providers is not None else {}
