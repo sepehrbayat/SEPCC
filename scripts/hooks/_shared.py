@@ -166,12 +166,98 @@ def prompt_routing_hint(prompt: str) -> str:
         hints.append(
             "loop: Ralph Loop only if configured, bounded, and test-verifiable"
         )
+    graph_hint = _graph_routing_hint(prompt, root)
+    if graph_hint:
+        hints.append(graph_hint)
     parts: list[str] = []
     if hints:
-        parts.append("FCC routing hint: " + "; ".join(hints[:3]) + ".")
+        parts.append("FCC routing hint: " + "; ".join(hints[:4]) + ".")
     if command_hint := command_protocol_hint(prompt):
         parts.append(command_hint)
     return " ".join(parts)
+
+
+def _graph_routing_hint(prompt: str, root: Path) -> str:
+    """Return a model-tier routing hint based on aggregate graph entity matching.
+
+    Searches the knowledge graph for entities matching words in the prompt and
+    computes an aggregate centrality score, cross-community count, and entity
+    count. Escalates to stronger models when the prompt touches multiple
+    high-impact entities — even if no single entity exceeds the threshold.
+    """
+    try:
+        from core.graph import load_graph
+        from core.graph.query import GraphQuery
+    except ImportError:
+        return ""
+    if not isinstance(root, Path):
+        return ""
+    graph_json = root / ".fcc" / "graph" / "graph.json"
+    if not graph_json.is_file():
+        return ""
+    try:
+        store = load_graph(root)
+        query = GraphQuery(store)
+    except Exception:
+        return ""
+
+    # Extract candidate words from prompt
+    words = [w.lower() for w in prompt.split() if len(w) > 2]
+    if not words:
+        return ""
+
+    # Search graph for matching entities
+    seen_ids: set[str] = set()
+    matched: list[dict[str, Any]] = []
+    for word in words[:8]:
+        for r in query.search(word, top_n=3):
+            if r["id"] not in seen_ids:
+                seen_ids.add(r["id"])
+                matched.append(r)
+
+    # Filter: code entities with meaningful type fields
+    code_matched = [
+        m for m in matched
+        if m.get("type") == "code"
+    ]
+
+    if not code_matched:
+        return "tier:haiku (no matching code entity — exploratory task)"
+
+    # Filter out noise: entities with centrality 0 (not connected to anything)
+    significant = [m for m in code_matched
+                   if (float(m.get("centrality", 0) or 0)) > 0.0]
+    if significant:
+        code_matched = significant
+
+    # Aggregate metrics
+    centralities = [float(m.get("centrality", 0) or 0) for m in code_matched]
+    total_centrality = sum(centralities)
+    max_centrality = max(centralities)
+    communities = {m.get("community") for m in code_matched if m.get("community")}
+    entity_count = len(code_matched)
+
+    # Determine tier via composite score
+    # sum_cent is primary; communities and entity_count are amplifiers
+    composite = total_centrality + (len(communities) * 0.05) + (entity_count * 0.02)
+
+    if (total_centrality > 1.0  # high-impact entities
+            or composite > 1.2  # strong aggregate signal
+            or (len(communities) > 5 and entity_count > 6 and total_centrality > 0.3)
+            or (len(communities) > 7 and entity_count > 9)):  # very broad sweep
+        tier = "opus"
+    elif total_centrality > 0.15 or max_centrality > 0.3 or composite > 0.4:
+        tier = "sonnet"
+    else:
+        return ""  # Default routing, no hint needed
+
+    parts = [
+        f"tier:{tier}",
+        f"matched:{entity_count}",
+        f"sum_cent:{total_centrality:.2f}",
+        f"communities:{len(communities)}",
+    ]
+    return "graph(" + " ".join(parts) + ")"
 
 
 def prompt_enhancement_hint(prompt: str, root: Path) -> str:
