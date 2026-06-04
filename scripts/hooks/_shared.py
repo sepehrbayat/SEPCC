@@ -143,11 +143,13 @@ def _term_matches(lowered: str, terms: tuple[str, ...]) -> bool:
     return False
 
 
-def prompt_routing_hint(prompt: str) -> str:
+def prompt_routing_hint(prompt: str, root: Path | None = None) -> str:
     """Return a tiny routing hint for prompts that need FCC orchestration."""
     stripped = prompt.lstrip()
     if not stripped or stripped.startswith("/"):
         return ""
+    if root is None:
+        root = nearest_project_root(Path.cwd())
     lowered = prompt.lower()
     hints: list[str] = []
     if _term_matches(lowered, _RECALL_TERMS):

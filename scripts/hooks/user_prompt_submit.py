@@ -63,7 +63,7 @@ def main() -> None:
         part
         for part in (
             enhancement_context,
-            prompt_routing_hint(prompt),
+            prompt_routing_hint(prompt, root),
             pipeline_context,
             graph_context,
         )
