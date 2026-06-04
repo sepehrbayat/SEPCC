@@ -24,6 +24,12 @@ class _AnthropicBlockBase(BaseModel):
 
 
 class ContentBlockText(_AnthropicBlockBase):
+    """Anthropic text content block — the primary message carrier.
+
+    30 dependents including all message conversion, streaming, and
+    optimization handlers.
+    """
+
     type: Literal["text"]
     text: str
 
@@ -186,9 +192,13 @@ class Message(BaseModel):
 
 
 class Tool(_AnthropicBlockBase):
+    """Anthropic tool definition — function name, description, and schema.
+
+    Server tools (web_search, web_fetch) may omit ``input_schema`` since
+    the provider owns the schema.  33 dependents across the API layer.
+    """
+
     name: str
-    # Anthropic server tools (e.g. web_search beta tools) include a ``type`` and
-    # may omit ``input_schema`` because the provider owns the schema.
     type: str | None = None
     description: str | None = None
     input_schema: dict[str, Any] | None = None

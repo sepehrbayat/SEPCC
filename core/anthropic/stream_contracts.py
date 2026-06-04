@@ -80,6 +80,11 @@ def parse_sse_lines(lines: Iterable[str]) -> list[SSEEvent]:
 
 
 def parse_sse_text(text: str) -> list[SSEEvent]:
+    """Parse a raw SSE response body into a list of SSEEvent frames.
+
+    Splits on newlines, delegates to parse_sse_lines.  Used by every
+    provider's streaming path — 28 dependents across the stack.
+    """
     return parse_sse_lines(text.splitlines())
 
 

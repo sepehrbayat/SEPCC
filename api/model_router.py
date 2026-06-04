@@ -15,6 +15,12 @@ from .models.anthropic import MessagesRequest, TokenCountRequest
 
 @dataclass(frozen=True, slots=True)
 class ResolvedModel:
+    """Fully-resolved model identity after provider routing.
+
+    Maps an incoming Claude model name to a concrete provider, model,
+    and thinking policy.  Used by every route handler — 33 dependents.
+    """
+
     original_model: str
     provider_id: str
     provider_model: str
@@ -24,6 +30,12 @@ class ResolvedModel:
 
 @dataclass(frozen=True, slots=True)
 class RoutedMessagesRequest:
+    """MessagesRequest paired with its resolved provider route.
+
+    Built by ModelRouter.resolve_messages_request() — 31 dependents
+    including ClaudeProxyService and the services layer.
+    """
+
     request: MessagesRequest
     resolved: ResolvedModel
 
