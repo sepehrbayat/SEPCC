@@ -124,6 +124,12 @@ class ProviderModel:
 
 @dataclass(frozen=True, slots=True)
 class SmokeConfig:
+    """Immutable smoke-test configuration loaded from environment variables.
+
+    Owns provider resolution, target filtering, timeout and prompt defaults,
+    and per-worker identity.  One instance per test worker, frozen after load.
+    """
+
     root: Path
     results_dir: Path
     live: bool

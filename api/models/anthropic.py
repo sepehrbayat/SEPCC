@@ -160,6 +160,12 @@ def _normalize_system_role_messages(data: Any) -> Any:
 # Message Types
 # =============================================================================
 class Message(BaseModel):
+    """One turn in an Anthropic Messages conversation — user or assistant.
+
+    Content is a polymorphic union of text, image, document, tool-use,
+    tool-result, thinking, and server-tool blocks.
+    """
+
     role: Literal["user", "assistant"]
     content: (
         str
@@ -198,6 +204,13 @@ class ThinkingConfig(BaseModel):
 # Request Models
 # =============================================================================
 class MessagesRequest(BaseModel):
+    """Inbound Anthropic Messages POST body — the core API contract.
+
+    Accepts model, messages, system prompt, tools, thinking config, and
+    metadata.  Internal routing fields are parsed but stripped before
+    forwarding to downstream providers.
+    """
+
     model_config = ConfigDict(extra="allow")
 
     model: str

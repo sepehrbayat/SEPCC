@@ -43,6 +43,13 @@ _ALLOWED_BLOCK_START_TYPES = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class SSEEvent:
+    """One parsed Server-Sent Events frame from an Anthropic stream.
+
+    Holds the event type name, the JSON-decoded data dict, and the raw
+    payload string for debug/logging purposes.  Used by every provider's
+    streaming path — break this and streaming fails everywhere.
+    """
+
     event: str
     data: dict[str, Any]
     raw: str
