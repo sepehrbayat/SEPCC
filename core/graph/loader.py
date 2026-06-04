@@ -113,6 +113,9 @@ def load_graph(root: Path) -> GraphStore:
         store.meta_set("source_node_count", str(len(nodes)))
         store.meta_set("source_edge_count", str(len(edges)))
 
+        # Save entity snapshot for diff-based change detection
+        _save_entity_snapshot(nodes, edges, store)
+
         return store
     except Exception:
         store.close()
@@ -193,6 +196,27 @@ def _derive_communities_from_nodes(
             "size": size,
             "central_nodes": [],
         })
+
+
+def _save_entity_snapshot(
+    nodes: list[dict[str, Any]], edges: list[dict[str, Any]], store: GraphStore
+) -> None:
+    """Save a compact entity snapshot to schema_meta for diff-based change detection.
+
+    Stores a JSON mapping of ``entity_id → {name, type, file}`` plus edge
+    relation counts so subsequent ``diff()`` calls can detect added, removed,
+    and modified entities.
+    """
+    import json as _json
+    snapshot = {
+        str(n["id"]): {"name": n.get("label") or n.get("name", n["id"]),
+                       "type": n.get("file_type") or n.get("type", "unknown"),
+                       "file": n.get("source_file") or n.get("file")}
+        for n in nodes if isinstance(n, dict) and n.get("id")
+    }
+    store.meta_set("entity_snapshot", _json.dumps(snapshot, separators=(",", ":")))
+    store.meta_set("entity_snapshot_count", str(len(snapshot)))
+    store.meta_set("edge_snapshot_count", str(len(edges)))
 
 
 def _compute_centrality(

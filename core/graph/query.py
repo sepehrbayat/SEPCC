@@ -485,11 +485,116 @@ class GraphQuery:
         }
 
     def diff(self, since: str) -> dict[str, Any]:
-        return {
+        """Entity-level change detection between graph builds.
+
+        ``since`` can be a commit hash (uses ``git diff`` for file-level
+        change detection) or ``"last_build"`` (compares against the stored
+        entity snapshot from the previous ``load_graph()`` run).
+
+        Returns added, removed, and modified entity lists, plus file-level
+        change info and a freshness flag.
+        """
+        import json as _json
+
+        # Load previous snapshot
+        raw_snapshot = self._store.meta_get("entity_snapshot")
+        prev_snapshot: dict[str, dict[str, str]] = {}
+        if raw_snapshot:
+            try:
+                prev_snapshot = _json.loads(raw_snapshot)
+            except (_json.JSONDecodeError, TypeError):
+                pass
+        prev_count = int(self._store.meta_get("entity_snapshot_count") or "0")
+
+        # Current entity map
+        current_entities: dict[str, dict[str, str]] = {}
+        rows = self._store._conn.execute(
+            "SELECT id, name, type, file FROM entities"
+        ).fetchall()
+        for row in rows:
+            current_entities[str(row["id"])] = {
+                "name": str(row["name"]),
+                "type": str(row["type"]),
+                "file": str(row["file"]) if row["file"] else None,
+            }
+
+        current_ids = set(current_entities.keys())
+        prev_ids = set(prev_snapshot.keys())
+
+        added_ids = current_ids - prev_ids
+        removed_ids = prev_ids - current_ids
+
+        # Find modified: same ID but different file, or different name
+        common_ids = current_ids & prev_ids
+        modified_ids: set[str] = set()
+        for eid in common_ids:
+            cur = current_entities[eid]
+            prev = prev_snapshot[eid]
+            if cur["file"] != prev.get("file") or cur["name"] != prev.get("name"):
+                modified_ids.add(eid)
+
+        # File-level change detection via git
+        changed_files: list[str] = []
+        git_available = False
+        if since and since != "last_build":
+            try:
+                result = subprocess.run(
+                    ["git", "diff", "--name-only", f"{since}..HEAD"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    changed_files = [
+                        f.strip() for f in result.stdout.splitlines() if f.strip()
+                    ]
+                    git_available = True
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+        # Entities in changed files (more specific than just ID diff)
+        file_affected_entities: list[str] = []
+        if changed_files:
+            changed_set = set(changed_files)
+            for eid, info in current_entities.items():
+                f = info.get("file")
+                if f and f in changed_set:
+                    file_affected_entities.append(eid)
+
+        # Build result
+        result: dict[str, Any] = {
             "since": since,
             "stats": self.stats(),
-            "note": "Entity-level diff not yet implemented. Use fcc_graph_stats for current state.",
+            "added_count": len(added_ids),
+            "removed_count": len(removed_ids),
+            "modified_count": len(modified_ids),
+            "file_affected_count": len(file_affected_entities),
+            "added_entities": sorted(added_ids)[:50],
+            "removed_entities": sorted(removed_ids)[:50],
+            "modified_entities": sorted(modified_ids)[:50],
+            "snapshot_previous_count": prev_count,
+            "snapshot_current_count": len(current_entities),
+            "git_changed_files": len(changed_files),
+            "git_available": git_available,
         }
+
+        if len(added_ids) > 50:
+            result["added_truncated"] = len(added_ids) - 50
+        if len(removed_ids) > 50:
+            result["removed_truncated"] = len(removed_ids) - 50
+        if len(modified_ids) > 50:
+            result["modified_truncated"] = len(modified_ids) - 50
+
+        # Freshness
+        needs_update = (
+            prev_count > 0 and len(added_ids) == len(current_entities)
+        )
+        if needs_update:
+            result["needs_rebuild"] = True
+            result["note"] = (
+                "Snapshot appears empty or from a different build. "
+                "Run load_graph() to refresh the snapshot."
+            )
+
+        return result
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
