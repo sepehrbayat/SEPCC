@@ -320,15 +320,54 @@ async def enhance_prompt_with_metadata(
             original_chars=len(prompt),
         )
         return PromptEnhancementResult(prompt, prompt, "timeout")
-    except Exception:
-        logger.warning("Enhancement LLM call failed, using original prompt")
+    except httpx.ConnectError as exc:
+        # Retry once on connection refused — the proxy may still be starting
+        logger.warning(
+            "Enhancement LLM connection refused ({}); retrying once...",
+            exc,
+        )
+        try:
+            await asyncio.sleep(0.5)
+            enhanced = await asyncio.wait_for(
+                _call_enhancement_llm(
+                    request_body, timeout, api_url=api_url, api_key=api_key
+                ),
+                timeout=timeout,
+            )
+        except Exception as retry_exc:
+            logger.warning(
+                "Enhancement LLM retry also failed: {}: {}",
+                type(retry_exc).__name__, retry_exc,
+            )
+            trace_event(
+                stage="enhancement",
+                event="prompt.enhancement.error",
+                source="session",
+                original_chars=len(prompt),
+                error_type=type(retry_exc).__name__,
+                error_detail=str(retry_exc)[:200],
+            )
+            return PromptEnhancementResult(
+                prompt, prompt, "error",
+                reason=f"{type(retry_exc).__name__}: {str(retry_exc)[:200]}"
+            )
+    except Exception as exc:
+        logger.warning(
+            "Enhancement LLM call failed: {}: {}",
+            type(exc).__name__, exc,
+        )
         trace_event(
             stage="enhancement",
             event="prompt.enhancement.error",
             source="session",
             original_chars=len(prompt),
+            error_type=type(exc).__name__,
+            error_detail=str(exc)[:200],
         )
-        return PromptEnhancementResult(prompt, prompt, "error")
+        return PromptEnhancementResult(
+            prompt, prompt, "error",
+            reason=f"{type(exc).__name__}: {str(exc)[:200]}"
+        )
 
     if not enhanced.strip():
         trace_event(

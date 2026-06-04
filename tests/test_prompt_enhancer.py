@@ -669,7 +669,82 @@ class TestEnhancePrompt:
         async def failing_call(*args, **kwargs):
             raise AssertionError("slash commands must not be enhanced")
 
-        monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", failing_call)
         result = await enhance_prompt("/compact keep provider decisions", "/tmp")
 
         assert result == "/compact keep provider decisions"
+
+    # ── Error handling + retry tests ──────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_connect_error_retries_once_then_fails_with_reason(self, monkeypatch):
+        """ConnectError must retry once, then store the error type in reason."""
+        from httpx import ConnectError
+
+        monkeypatch.setattr(
+            "core.prompt_enhancer._read_project_context",
+            lambda p: "context",
+        )
+
+        call_count = 0
+
+        async def connect_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise ConnectError("Connection refused")
+
+        monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", connect_fail)
+
+        result = await enhance_prompt_with_metadata("fix bug", "/tmp")
+        assert result.status == "error"
+        assert call_count == 2  # Original + 1 retry
+        assert "ConnectError" in result.reason
+        assert "Connection refused" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_non_connect_error_does_not_retry(self, monkeypatch):
+        """RuntimeError (not ConnectError) must fail immediately, no retry."""
+        monkeypatch.setattr(
+            "core.prompt_enhancer._read_project_context",
+            lambda p: "context",
+        )
+
+        call_count = 0
+
+        async def runtime_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("something broke")
+
+        monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", runtime_fail)
+
+        result = await enhance_prompt_with_metadata("fix bug", "/tmp")
+        assert result.status == "error"
+        assert call_count == 1  # No retry for non-connection errors
+        assert "RuntimeError" in result.reason
+        assert "something broke" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_connect_error_single_retry_succeeds(self, monkeypatch):
+        """First call fails with ConnectError, retry succeeds."""
+        from httpx import ConnectError
+
+        monkeypatch.setattr(
+            "core.prompt_enhancer._read_project_context",
+            lambda p: "context",
+        )
+
+        call_count = 0
+
+        async def retry_then_ok(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectError("Connection refused")
+            return "enhanced after retry"
+
+        monkeypatch.setattr("core.prompt_enhancer._call_enhancement_llm", retry_then_ok)
+
+        result = await enhance_prompt_with_metadata("fix bug", "/tmp")
+        assert result.status == "enhanced"
+        assert call_count == 2
+        assert result.enhanced_prompt == "enhanced after retry"

@@ -366,6 +366,9 @@ def _enhancement_status_message(result: Any) -> str:
     if status == "unchanged":
         return "FCC auto-enhancer checked this prompt; no rewrite needed."
     if status in {"timeout", "error", "empty", "context_error"}:
+        reason = str(getattr(result, "reason", status))
+        if reason and reason != status:
+            return f"FCC auto-enhancer could not refine this prompt ({status}: {reason[:120]}); using original."
         return f"FCC auto-enhancer could not refine this prompt ({status}); using original."
     if status == "unavailable":
         reason = str(getattr(result, "reason", "import_error"))
