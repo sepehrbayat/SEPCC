@@ -15,6 +15,10 @@ _TEST_PATH_SEGMENTS = frozenset({
     "/tests/", "/test/", "/smoke/", "/spec/",
     "test_", "conftest.py", "__pycache__",
 })
+# Directories that are test-only when they appear as path prefixes or segments.
+# (e.g. ``smoke/lib/claude_cli_matrix.py`` starts with ``smoke/`` but has no
+# leading ``/`` before it, so it wouldn't match ``/smoke/`` alone.)
+_TEST_PATH_PREFIXES = frozenset({"smoke/", "tests/", "spec/"})
 
 _PYTHON_BUILTIN_NAMES = frozenset({
     "str", "int", "float", "bool", "bytes", "object", "type",
@@ -60,6 +64,9 @@ def _is_test_entity(entity: dict[str, Any] | None) -> bool:
     file_lower = file.lower().replace("\\", "/")
     for seg in _TEST_PATH_SEGMENTS:
         if seg in file_lower:
+            return True
+    for prefix in _TEST_PATH_PREFIXES:
+        if file_lower.startswith(prefix):
             return True
     return False
 
@@ -310,6 +317,7 @@ class GraphQuery:
     def god_nodes(
         self, top_n: int = 10, community: str | None = None,
         exclude_external: bool = False,
+        exclude_test_only: bool = True,
     ) -> list[dict[str, Any]]:
         """Most-depended-on entities ranked by in-degree centrality.
 
@@ -320,9 +328,14 @@ class GraphQuery:
         (Python builtins, stdlib, external libraries) are filtered out.
         This prevents ``str``, ``int``, ``Exception``, etc. from inflating
         the god node list.
+
+        When ``exclude_test_only`` is True (the default), entities whose
+        dependents are exclusively test files are filtered out.  This prevents
+        test infrastructure like ``SmokeConfig`` from appearing as #2 god node
+        when it has zero production dependents.
         """
         nodes = self._store.get_top_by_centrality(
-            limit=top_n * 3 if exclude_external else top_n,
+            limit=top_n * 5 if (exclude_external or exclude_test_only) else top_n,
             community=community,
         )
         for node in nodes:
@@ -331,8 +344,28 @@ class GraphQuery:
             nodes = [
                 n for n in nodes
                 if n.get("file") and not _is_builtin_entity(n)
-            ][:top_n]
+            ]
+        if exclude_test_only:
+            nodes = [n for n in nodes if not self.is_test_only(n["id"])]
         return nodes[:top_n]
+
+    def is_test_only(self, entity_id: str) -> bool:
+        """Return True when an entity has zero production dependents.
+
+        An entity is *test-only* when every incoming relationship comes from
+        a test, smoke, spec, or conftest file.  Such entities may have high
+        centrality scores but their changes don't affect production code.
+        """
+        incoming = self._store.get_incoming_relations(entity_id)
+        if not incoming:
+            return False  # No dependents at all — not test-only, just isolated
+        for rel in incoming:
+            dep = self._store.get_entity(rel["source_id"])
+            if dep is None:
+                continue
+            if not _is_test_entity(dep):
+                return False  # At least one production dependent
+        return True  # All dependents are test files
 
     def search(self, query: str, top_n: int = 10) -> list[dict[str, Any]]:
         return self._store.search_fts(query, limit=top_n)
