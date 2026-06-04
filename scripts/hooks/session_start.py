@@ -32,12 +32,29 @@ def _graph_context(root: object) -> str:
     try:
         store = load_graph(root)
         query = GraphQuery(store)
-        return build_session_bootstrap(query)
+        changed_files = _changed_files(root)
+        return build_session_bootstrap(query, changed_files=changed_files)
     except Exception as exc:
         return (
             f"## Graph Context\nGraph context unavailable ({type(exc).__name__}). "
             "Rebuild with: fcc-bootstrap-context --install-graphify"
         )
+
+
+def _changed_files(root) -> list[str]:
+    """Return list of files changed since last commit, or empty list on failure."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=str(root),
+        )
+        if result.returncode == 0:
+            return [f.strip() for f in result.stdout.splitlines() if f.strip()]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return []
 
 
 def main() -> None:
