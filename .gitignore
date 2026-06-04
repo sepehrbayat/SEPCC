@@ -26,6 +26,8 @@ CLAUDE.local.md
 .fcc/debugger/
 .fcc/sessions.sqlite
 
+.fcc/prompt_stats.jsonl
+
 # graphify knowledge graph — runtime state, rebuilt on demand
 .fcc/graph/
 graphify-out/

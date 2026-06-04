@@ -11,18 +11,18 @@
 - Keep this file for durable project facts that should be safe to share with future sessions.
 
 ## Current State
-- | `scripts/graph/mcp_server.py` | B2: cached store, B22: missing/corrupted messages, B23: param validation, B24: parse error responses |
-- | `cli/context_doctor.py` | B25: threshold message |
-- | `tests/graph/test_*.py` | 22 new tests covering all 31 bugs |
-- user: fix the last issue
-- assistant: Now let me test this with `circuit_breaker` specifically:
+- user: Alright, commit and push the latest version to Git, and if needed, update the README documentation or anything else as well.
+- assistant: This is a major release-level set of changes. Let me update the version and README.
+- assistant: Now update the "How agents use it" table to include the new tools:
+- assistant: Provider request timed out after 300s.
+- Request ID: req_f2e8ebe1fbcb
 
 ## Decisions
+- Usage sites can never have docstrings, never be "high impact," and never need tests dedicated to them — they're not real entities, they're import statements
 - The full graph is never rebuilt from scratch unless explicitly requested
 - This is the critical design decision
 - file counts, decision extraction from task 1 transcript
 - The main session never knows it's being monitored
-- user: Given your understanding of the project and of yourself as an agent, you’re in the best position to judge it and, in my opinion, you should choose the best strategy yourself
 
 ## Next Steps
 - Run /verify-context before major edits.

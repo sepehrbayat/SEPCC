@@ -90,3 +90,14 @@
 - py:392-394` | **Dead code** — `_json_errors` set never read or exposed |
 ## 2026-06-03
 - assistant: Found it! `in_deg[eid]` on a Python `Counter` returns 0 for missing keys but **never creates the entry**
+## 2026-06-04
+- Fatal errors never retried |
+## 2026-06-04
+- Fatal errors never retry
+## 2026-06-04
+- Non-connection errors (like RuntimeError) are never retried
+## 2026-06-04
+- The one "no doc" flag was a false positive from usage-site entities that can never have definitions
+## 2026-06-04
+- It can never have a docstring
+- Usage sites can never have docstrings, never be "high impact," and never need tests dedicated to them — they're not real entities, they're import statements

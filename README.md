@@ -2,7 +2,7 @@
 
 # SEPCC — Unlimited Claude Code, with context that survives
 
-> **v2.2.0** — Knowledge Graph v2 · Directional Centrality · Test-Filtered Impact · 308 graph tests · Zero-Leak MCP
+> **v2.3.0** — Semantic Enrichment · Quality Gates · AI-Assisted Dev Guardrails · Prompt Observability · Recovery Layer · 1,916 Tests
 
 A free and open-source proxy that gives you **unlimited Claude Code** access by routing API calls through any provider you choose. Built on [Free Claude Code](https://github.com/Alishahryar1/free-claude-code), SEPCC adds sessions you can actually resume, a context handoff that survives crashes, visible auto prompt enhancement, an agent debugger and fixer pipeline, a knowledge graph for codebase-wide structural understanding, and a one-command project bootstrapper — everything you need for real, multi-session work with **unlimited Claude Code** usage, no Anthropic rate limits, no per-token bills.
 
@@ -18,6 +18,7 @@ A free and open-source proxy that gives you **unlimited Claude Code** access by 
 
 - [The short version](#the-short-version)
 - [What SEPCC adds](#what-sepcc-adds)
+- [Quality Gates](#quality-gates)
 - [Quick Start](#quick-start)
   - [1. Install](#1-install)
   - [2. Start the proxy](#2-start-the-proxy)
@@ -259,6 +260,24 @@ Claude Code's official docs document `SubagentStop` as the stable hook for subag
 
 ---
 
+## Quality Gates
+
+**Every SEPCC session enforces AI-assisted development guardrails.** Before any task, the agent runtime requires reading `.fcc/context/quality-gates.md` — a binding quality contract covering:
+
+- **Pre-task gate**: scope, boundaries, outcome, failure modes, verification — must be answered before starting
+- **Product-centered rule**: every change must support a real user story
+- **Controlled confidence**: inspect context, preserve conventions, document tradeoffs
+- **Red flags**: multiple warning signs of poor AI-assisted outcomes
+- **Architecture, security, and testing gates**: specific anti-patterns to avoid
+- **Definition of done**: scope respected, tests pass, TODOs documented
+- **Golden rules**: don't trust polished UI without clear journey, don't trust tests that only cover happy paths, don't add features without purpose
+
+The one-line rule: *"A project becomes poorly AI-assisted when its appearance moves faster than understanding, implementation moves faster than review, and claims move faster than reality."*
+
+The quality gates are injected into every SessionStart alongside CLAUDE.md and the handoff. They're copied automatically for new projects via `fcc-bootstrap-context`.
+
+---
+
 ## Quick Start
 
 ### 1. Install
@@ -486,17 +505,36 @@ This installs `graphifyy[leiden]` (Leiden community detection), builds the initi
 
 | Touchpoint | What happens |
 |---|---|
-| **Session start** | Community overview + god nodes (top 8 by in-degree centrality) injected into context |
-| **Every prompt** | Entity matches from graph injected with community, connection count, god-node markers |
-| **During work** | 9 MCP tools: search (progressive FTS5→LIKE→token-AND→token-OR), neighbors, impact (relation-filtered, test-excluded), explain (in/out, prod/test split), path (edge-filtered, test-excluded), god nodes (in-degree ranked, builtin-filtered), community, entity, stats (staleness) |
-| **Pre-compaction** | Structural anchors preserved so orientation survives context compaction |
+| **Session start** | Community overview + god nodes (top 8, test-filtered, usage-site-excluded) + changed files from git diff |
+| **Every prompt** | Entity matches from graph injected with docstring excerpts + graph-driven multi-entity routing hints |
+| **During work** | 10 MCP tools: search (progressive FTS5→LIKE→token-AND→token-OR), neighbors, impact (relation-filtered, test-excluded), explain (in/out, prod/test split), path (edge-filtered, test-excluded), god nodes (in-degree ranked, builtin+test+usage-site filtered), community, entity, stats (staleness), **inspect** (signature+docstring+callers) |
+| **Pre-compaction** | Adaptive, conversation-aware context — extracts identifiers from transcript, injects only conversation-relevant entities and their communities |
 | **Handoff** | `## Structural Context` section with active communities, modified god nodes, graph version |
 | **Context doctor** | 6 graph health checks: missing, stale (commit mismatch), oversized (>50MB), multigraph edge-collapse risk, git hook installed, token savings benchmark |
-| **Routing** | `graph_rules` in `.fcc/router.yml`: editing a god node (centrality > 0.8) → Opus tier; unknown entity → Haiku tier |
+| **Routing** | `graph_rules` in `.fcc/router.yml` + aggregate centrality scoring: multi-entity matching in `_graph_routing_hint()` routes to Opus when sum_centrality > 1.0 or wide cross-community |
 
 ### Centrality and Direction
 
-v2.2 uses **directional centrality** — computed from in-degree (how many things depend on this entity), not total degree. This correctly identifies entities with architectural gravity rather than entities that merely import many things. `exclude_external: true` filters Python builtins (`str`, `int`, `Exception`) from god node results. `exclude_tests: true` removes test/smoke artifacts from impact analysis, paths, and explain output.
+SEPCC uses **directional centrality** — computed from in-degree (how many things depend on this entity), not total degree. Multiple filters eliminate false positives:
+
+- `exclude_external: true` filters Python builtins (`str`, `int`, `Exception`) from god node results
+- `exclude_test_only: true` (default) removes entities whose dependents are 100% test files (e.g., `SmokeConfig` with 128 test-only dependents)
+- `is_usage_site()` distinguishes definition sites from import references — `Settings` in `api/model_router.py` is an import, not the Settings class
+
+### Semantic Enrichment (v2.3)
+
+`core/graph/enrich.py` populates docstrings and signatures directly from source code using AST parsing — no LLM needed. After every `load_graph()`, enrichment extracts:
+
+- Function/class signatures (type-annotated)
+- Docstrings (first sentence)
+- Base classes and decorators
+- Entity kind (function, async function, class, property)
+
+4,600+ entities enriched (90% of code entities). `inspect(entity_id)` returns a complete entity card — signature, docstring, callers, dependencies, community peers — without opening the source file. `fcc_graph_inspect` is the 10th MCP tool.
+
+### Entity-Level Diff
+
+`query.diff("last_build")` returns added, removed, and modified entities between graph builds. The entity snapshot is stored in `schema_meta` on every `load_graph()`. Supports git range diff for file-level change detection.
 
 ### Architecture
 
@@ -507,27 +545,58 @@ graphify . --output .fcc/graph/     ← extraction (once, on bootstrap or commit
 .fcc/graph/graph.json               ← source of truth
        │
        ▼
-core/graph/loader.py                ← validates, normalizes, ingests, computes centrality
+core/graph/loader.py                ← validates, normalizes, ingests, centrality
+       │
+       ▼
+core/graph/enrich.py                ← AST parses source files, extracts docstrings + signatures
        │
        ▼
 core/graph/store.py                 ← SQLite + FTS5 + in_degree/out_degree columns
        │
        ▼
-core/graph/query.py                 ← directed BFS: impact, path (with filters), explain (split)
+core/graph/query.py                 ← search, neighbors, impact, path, explain, inspect, diff
        │
        ▼
 core/graph/context.py               ← builds injection strings for hooks
        │
        ▼
-scripts/hooks/session_start.py      ← injects structural summary at session start
-scripts/hooks/user_prompt_submit.py ← injects entity matches at prompt submit
-scripts/hooks/precompact.py         ← injects structural anchors before compaction
-scripts/graph/mcp_server.py         ← 9 MCP tools over stdio JSON-RPC (cached, JSON-RPC compliant)
+core/hanser.py                      ← graph-native complexity scoring + prompt enrichment
+       │
+       ▼
+scripts/hooks/session_start.py      ← structural summary + changed_files at session start
+scripts/hooks/user_prompt_submit.py ← entity matches + graph-driven routing hints
+scripts/hooks/precompact.py         ← adaptive conversation-aware graph context
+scripts/graph/mcp_server.py         ← 10 MCP tools (incl. fcc_graph_inspect)
 ```
 
-### SQLite schema
+### Graph-informed model routing
 
-The graph is stored in `.fcc/graph/store.db` with a `schema_meta` table for metadata (`graph_version`, `built_at_commit`, `source_node_count`, `source_edge_count`), `entities` with `in_degree` and `out_degree` columns, `relations`, `communities`, and `entity_fts` (FTS5 full-text search). `warnings()` method surfaces accumulated non-fatal errors (JSON parse failures, FTS5 trigger issues).
+`.fcc/router.yml` includes `graph_rules` that the `route-task` skill evaluates:
+
+```yaml
+graph_rules:
+  - match: "graph:centrality > 0.8"
+    tier: opus
+    reason: "Editing a god node — broad transitive effects"
+  - match: "graph:community:size > 20"
+    tier: opus
+    reason: "Large architectural domain warrants stronger reasoning"
+  - match: "graph:impact:files > 10"
+    tier: opus
+    reason: "Broad change requires careful planning across many files"
+  - match: "graph:unknown"
+    tier: haiku
+    reason: "No matching entity — exploratory task, start with fast model"
+```
+
+Beyond single-entity rules, **aggregate centrality scoring** (`_graph_routing_hint()`) scans all entities matched from the prompt, sums centrality, counts community span, and escalates to Opus even when no individual entity exceeds 0.8 — a prompt touching 5 medium-impact entities across 7 communities triggers Opus.
+
+### Graph System Observability
+
+- **`fcc-prompts-stats`** — aggregates prompt enhancement metrics from `.fcc/prompt_stats.jsonl` and server.log TRACE events: status breakdown, avg char deltas, time range, effectiveness verdict
+- **Entity-level diff** — `fcc_graph_diff` detects added/removed/modified entities between builds, supporting file-level change detection via git range diff
+- **Entity snapshot** — stored in `schema_meta` on every `load_graph()`, enabling delta-based change awareness
+- **Hanser complexity engine** — `core/hanser.py` provides graph-native complexity scoring (0.0–1.0) and model tier suggestion without LLM calls
 
 ### Error handling
 
@@ -540,25 +609,9 @@ The graph is stored in `.fcc/graph/store.db` with a `schema_meta` table for meta
 - Missing required params → JSON-RPC -32602 (Invalid params), not generic -32603
 - Parse errors → JSON-RPC -32700 response, not silent skip
 
-### Graph-informed model routing
+### Provider Recovery Layer (v2.3)
 
-`.fcc/router.yml` includes `graph_rules` that the `route-task` skill evaluates:
-
-```yaml
-graph_rules:
-  - match: "graph:centrality > 0.8"
-    tier: opus
-    reason: "Editing a god node — broad transitive effects require careful reasoning"
-  - match: "graph:community:size > 20"
-    tier: opus
-    reason: "Large architectural domain warrants stronger reasoning"
-  - match: "graph:impact:files > 10"
-    tier: opus
-    reason: "Broad change requires careful planning across many files"
-  - match: "graph:unknown"
-    tier: haiku
-    reason: "No matching entity — exploratory task, start with fast model"
-```
+`providers/recovery.py` fills the gap between error definitions and ad-hoc retry logic in provider clients. The `ProviderRecovery` class classifies errors as `TRANSIENT` (retry), `CIRCUIT` (retry with backoff), or `FATAL` (never retry), then wraps any async operation with retry + exponential backoff + jitter. Fatal errors (auth, validation) are never retried. ConnectError gets one retry with 500ms delay — the proxy may still be starting when the hook fires.
 
 ---
 
@@ -588,6 +641,8 @@ Manual enhancement still exists:
 ```
 
 `/enhance` returns the refined prompt inline so you can inspect or edit it before sending another message. Auto enhancement skips slash commands by design, so command protocols remain deterministic.
+
+If the enhancer cannot reach the proxy (connection refused, still starting), it retries once with a 500ms delay. All errors now surface the actual exception type and message in the visible status output (e.g., `ConnectError: Connection refused`) instead of a generic "error" — making enhancement failures auditable and debuggable. Fatal errors (auth, validation) are never retried.
 
 When you connect an editor directly instead of using `fcc`, make sure the editor process has the same proxy and enhancer environment variables. For source checkouts, `FCC_PACKAGE_ROOT` should point at the SEPCC repo root so hook scripts can import shared code instead of falling back to a degraded mode.
 
