@@ -11,18 +11,18 @@
 - Keep this file for durable project facts that should be safe to share with future sessions.
 
 ## Current State
-- user: Alright, commit and push the latest version to Git, and if needed, update the README documentation or anything else as well.
-- assistant: This is a major release-level set of changes. Let me update the version and README.
-- assistant: Now update the "How agents use it" table to include the new tools:
-- assistant: Provider request timed out after 300s.
-- Request ID: req_f2e8ebe1fbcb
+- | **Adaptive PreCompact** | Transcript-aware entity injection in `precompact.py` |
+- | **Multi-entity routing** | Aggregate centrality in `_graph_routing_hint()` |
+- | **Test infrastructure** | 6 libraries installed, 62 advanced tests (hypothesis + freezegun + syrupy + mock) |
+- | **OpenCode tests** | 6 unit tests for OpenCode Zen provider |
+- | **Graph impact** | 25 queries, ~35 file reads saved, ~35 min saved, 93% finding accuracy |
 
 ## Decisions
 - Usage sites can never have docstrings, never be "high impact," and never need tests dedicated to them — they're not real entities, they're import statements
+- Pick up the last task as if the break never happened
 - The full graph is never rebuilt from scratch unless explicitly requested
 - This is the critical design decision
 - file counts, decision extraction from task 1 transcript
-- The main session never knows it's being monitored
 
 ## Next Steps
 - Run /verify-context before major edits.

@@ -343,6 +343,7 @@ def _enhance_prompt_with_core(
             enhanced_prompt=prompt,
             status="unavailable",
             reason=type(exc).__name__,
+            changed=False,
         )
 
     return enhance_prompt_sync(
