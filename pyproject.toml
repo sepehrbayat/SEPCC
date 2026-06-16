@@ -9,7 +9,7 @@ description = "SEPCC — A Claude Code proxy with context that survives. Route C
 readme = "README.md"
 requires-python = ">=3.14.0"
 dependencies = [
-    "fastapi[standard]>=0.136.1",
+    "fastapi[standard]>=0.136.3",
     "uvicorn>=0.47.0",
     "httpx[socks]>=0.28.1",
     "markdown-it-py>=4.2.0",
